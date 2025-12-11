@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.so_utils import clean_so
+from core.services.date_engine import DateEngine
 from config import (
     DATA_SHEET_NAME, HEADER_ROW,
     COL_3MS_SO, COL_CONTRACT, COL_SO_STATUS, COL_USER_STATUS,
@@ -11,7 +12,7 @@ from config import (
     COL_OLD_METER, COL_NEW_METER, COL_NEW_COMM
 )
 
-# Helpers (moved from text.py)
+# Helpers
 def normalize_status_date_string(raw):
     if raw is None: return ""
     s = str(raw).strip()
@@ -23,19 +24,6 @@ def normalize_status_date_string(raw):
     try:
         return datetime.strptime(s, "%Y-%m-%d").strftime("%b %d, %Y, %I:%M %p")
     except ValueError: return s
-
-def extract_date_only(raw_text):
-    if not raw_text: return None
-    s = str(raw_text).strip()
-    if "," in s: s = s.split(",")[0].strip() + ", " + s.split(",")[1].strip()
-    try:
-        return datetime.strptime(s, "%b %d, %Y").date()
-    except ValueError: return None
-
-def get_hari_field(raw_text):
-    d = extract_date_only(raw_text)
-    if not d: return ""
-    return "Hujung Minggu" if d.weekday() == 6 else "Hari Biasa"
 
 def get_business_area(site_id):
     s = str(site_id).strip()
@@ -56,6 +44,11 @@ class ClaimService:
             header=HEADER_ROW - 1, 
             dtype=str
         )
+        
+        # Handle case where sheet_name=None returns a dict of all sheets
+        if isinstance(df, dict):
+            # Use the first sheet found
+            df = list(df.values())[0]
 
         # Normalize Columns
         df = df.rename(columns={
@@ -101,7 +94,10 @@ class ClaimService:
             
             raw_status = row0.get(COL_STATUS_DATE, "") or ""
             status_str = normalize_status_date_string(raw_status)
-            date_obj = extract_date_only(status_str)
+            
+            # Use DateEngine to parse just for stats/sorting
+            date_obj = DateEngine.parse_date(status_str)
+            
             if not date_obj and str(raw_status).strip():
                 stats["invalid_dates"] += 1
             if not (row0.get(COL_ADDRESS, "") or "").strip():
@@ -122,6 +118,12 @@ class ClaimService:
         rows = []
         for i, g in enumerate(so_groups, 1):
             r0 = g["row0"]
+            
+            # --- DATE LOGIC CORE ---
+            # Currently we don't have OCR dates in the builder flow, so ocr_date=None
+            # But the logic will still calculate Hari/TaskForce based on Status Date
+            logic = DateEngine.calculate(g["status_str"], ocr_date_str=None)
+            
             rows.append({
                 "Qty": i,
                 "Service Order": g["so"],
@@ -137,10 +139,12 @@ class ClaimService:
                 "Old Device No": r0.get(COL_OLD_METER, "") or "",
                 "New Device No": r0.get(COL_NEW_METER, "") or "",
                 "Comm Module No": r0.get(COL_NEW_COMM, "") or "",
-                "Hari Field": get_hari_field(g["status_str"]),
+                
+                # Derived Fields
+                "Hari Field": logic["hari"],
                 "Jenis Kerja": "KERJA BIASA",
-                "Remarks 1": "",
-                "Remarks 2": "",
+                "Remarks 1": logic["remarks_1"],
+                "Remarks 2": logic["remarks_2"],
             })
         
         return rows, stats
