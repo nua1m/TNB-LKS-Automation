@@ -13,17 +13,7 @@ from config import (
 )
 
 # Helpers
-def normalize_status_date_string(raw):
-    if raw is None: return ""
-    s = str(raw).strip()
-    if not s: return ""
-    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(s, fmt).strftime("%b %d, %Y, %I:%M %p")
-        except ValueError: pass
-    try:
-        return datetime.strptime(s, "%Y-%m-%d").strftime("%b %d, %Y, %I:%M %p")
-    except ValueError: return s
+
 
 def get_business_area(site_id):
     s = str(site_id).strip()
@@ -33,14 +23,16 @@ def get_business_area(site_id):
 
 class ClaimService:
     @staticmethod
-    def build_rows(data_path):
+    def build_rows(data_path, sheet_name=None):
         """Reads RAW data and returns processed rows + stats."""
         data_path = Path(data_path)
         
         # Load Data
+        target_sheet = sheet_name if sheet_name else DATA_SHEET_NAME
+        
         df = pd.read_excel(
             data_path, 
-            sheet_name=DATA_SHEET_NAME, 
+            sheet_name=target_sheet, 
             header=HEADER_ROW - 1, 
             dtype=str
         )
@@ -51,17 +43,27 @@ class ClaimService:
             df = list(df.values())[0]
 
         # Normalize Columns
+        # Note: Preprocessor converts headers to UPPERCASE.
         df = df.rename(columns={
-            "3MS SO No.": COL_3MS_SO, "3MS SO No": COL_3MS_SO, "SO Number": COL_3MS_SO,
-            "Contract Account": COL_CONTRACT, "SO Status": COL_SO_STATUS, "User Status": COL_USER_STATUS,
-            "Address": COL_ADDRESS, "Voltage": COL_VOLTAGE, "SO Type": COL_SO_TYPE, "SO Description": COL_SO_DESC,
-            "Technician": COL_TECHNICIAN, "Status Date": COL_STATUS_DATE, "Site ID": COL_SITE_ID,
-            "Old Meter no": COL_OLD_METER, "Old Meter No": COL_OLD_METER,
-            "New Meter no": COL_NEW_METER, "New Meter No": COL_NEW_METER, "New Comm Module": COL_NEW_COMM,
+            "3MS SO No.": COL_3MS_SO, "3MS SO No": COL_3MS_SO, "SO Number": COL_3MS_SO, "3MS SO NO.": COL_3MS_SO,
+            "Contract Account": COL_CONTRACT, "CONTRACT ACCOUNT": COL_CONTRACT,
+            "SO Status": COL_SO_STATUS, "SO STATUS": COL_SO_STATUS,
+            "User Status": COL_USER_STATUS, "USER STATUS": COL_USER_STATUS,
+            "Address": COL_ADDRESS, "ADDRESS": COL_ADDRESS,
+            "Voltage": COL_VOLTAGE, "VOLTAGE": COL_VOLTAGE,
+            "SO Type": COL_SO_TYPE, "SO TYPE": COL_SO_TYPE,
+            "SO Description": COL_SO_DESC, "SO DESCRIPTION": COL_SO_DESC,
+            "Technician": COL_TECHNICIAN, "TECHNICIAN": COL_TECHNICIAN,
+            "Status Date": COL_STATUS_DATE, "STATUS DATE": COL_STATUS_DATE,
+            "Site ID": COL_SITE_ID, "SITE ID": COL_SITE_ID,
+            "Old Meter no": COL_OLD_METER, "Old Meter No": COL_OLD_METER, "OLD METER NO": COL_OLD_METER,
+            "New Meter no": COL_NEW_METER, "New Meter No": COL_NEW_METER, "NEW METER NO": COL_NEW_METER,
+            "New Comm Module": COL_NEW_COMM, "NEW COMM MODULE": COL_NEW_COMM,
         })
 
         if COL_3MS_SO not in df.columns:
-            raise KeyError(f"Missing '{COL_3MS_SO}' in RAW DATA.")
+            # Debugging helper: Identify close matches or print all
+            raise KeyError(f"Missing '{COL_3MS_SO}' in RAW DATA. Available columns: {list(df.columns)}")
 
         df = df[df[COL_3MS_SO].astype(str).str.strip() != ""]
         if df.empty: raise ValueError("RAW DATA has no valid SO rows.")
@@ -93,10 +95,15 @@ class ClaimService:
             row0 = subdf.iloc[0]
             
             raw_status = row0.get(COL_STATUS_DATE, "") or ""
-            status_str = normalize_status_date_string(raw_status)
+            # Parse date using DateEngine
+            # We want to keep the full datetime object for writing to Excel later
+            date_obj = DateEngine.parse_datetime(raw_status)
+            status_str = str(raw_status) # Keep original just in case, or for debug
             
-            # Use DateEngine to parse just for stats/sorting
-            date_obj = DateEngine.parse_date(status_str)
+            # If we successfully parsed a datetime, we can format it for display in logs if needed
+            # but for the "Status Date" field in the row, we should store the object.
+            
+            # date_obj is now a datetime object (or None)
             
             if not date_obj and str(raw_status).strip():
                 stats["invalid_dates"] += 1
@@ -106,12 +113,12 @@ class ClaimService:
             so_groups.append({
                 "so": so_clean,
                 "row0": row0,
-                "status_str": status_str,
+                "status_val": date_obj if date_obj else raw_status, # Store object or raw string
                 "date_obj": date_obj,
                 "site_id": row0.get(COL_SITE_ID, "") or ""
             })
 
-        so_groups.sort(key=lambda g: g["date_obj"] or datetime.min.date())
+        so_groups.sort(key=lambda g: (g["date_obj"].date() if g["date_obj"] else datetime.min.date()))
         stats["sos_after_tras"] = len(so_groups)
 
         # Build Objects
@@ -122,7 +129,7 @@ class ClaimService:
             # --- DATE LOGIC CORE ---
             # Currently we don't have OCR dates in the builder flow, so ocr_date=None
             # But the logic will still calculate Hari/TaskForce based on Status Date
-            logic = DateEngine.calculate(g["status_str"], ocr_date_str=None)
+            logic = DateEngine.calculate(g["status_val"], ocr_date_str=None)
             
             rows.append({
                 "Qty": i,
@@ -133,7 +140,7 @@ class ClaimService:
                 "Voltage": r0.get(COL_VOLTAGE, "") or "",
                 "SO Description": r0.get(COL_SO_TYPE, "") or r0.get(COL_SO_DESC, "") or "",
                 "Labor": r0.get(COL_TECHNICIAN, "") or "",
-                "Status Date": g["status_str"],
+                "Status Date": g["status_val"],
                 "Site": g["site_id"],
                 "Business Area": get_business_area(g["site_id"]),
                 "Old Device No": r0.get(COL_OLD_METER, "") or "",
@@ -174,6 +181,9 @@ class ClaimService:
                 if field in text_cols:
                     cell.value = "" if val is None else str(val)
                     cell.number_format = "@"
+                elif field == "Status Date" and isinstance(val, (datetime, pd.Timestamp)):
+                     cell.value = val
+                     cell.number_format = "d mmm, yyyy, h:mm AM/PM"
                 else:
                     cell.value = val
 

@@ -51,3 +51,4 @@ SERVICE_ORDER_COL_IDX = 2    # Column B in CLAIM/ATTACHMENT
 # OTHER CONSTANTS
 # ================================================================
 # Add more here if other modules need configuration
+DEFAULT_TEMPLATE_PATH = r"C:\Users\syahm\Desktop\TNB_LKS_Dev\v1.4\Data\LKS Template (M).xlsm"

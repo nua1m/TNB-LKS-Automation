@@ -11,15 +11,35 @@ from core.excel_handler import ExcelHandler
 from core.so_utils import clean_so
 from core.services.claim_service import ClaimService
 from core.services.image_injector import ImageInjector
+from core.services.claim_service import ClaimService
+from core.services.image_injector import ImageInjector
 from core.services.quality_control import QualityControl
+from core.services.preprocessor import Preprocessor
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python main.py <data.xlsx> <template.xlsx>")
+    if len(sys.argv) < 2:
+        print("Usage: python main.py <data.xlsx> [template.xlsx]")
         sys.exit(1)
 
     data_path = Path(sys.argv[1]).resolve()
-    template_path = Path(sys.argv[2]).resolve()
+    
+    if len(sys.argv) >= 3:
+        template_path = Path(sys.argv[2]).resolve()
+    else:
+        # Use default template from config
+        from config import DEFAULT_TEMPLATE_PATH
+        # Try to resolve relative to current dir, then relative to project root if needed
+        # Assuming run from root
+        template_path = Path(DEFAULT_TEMPLATE_PATH).resolve()
+        
+        if not template_path.exists():
+             # Fallback: check if it's in the current dir directly
+             if Path(DEFAULT_TEMPLATE_PATH).name in [p.name for p in Path.cwd().glob("*")]:
+                 template_path = Path(Path(DEFAULT_TEMPLATE_PATH).name).resolve()
+                 
+    if not template_path.exists():
+        print(f"{RED}Error: Template file not found: {template_path}{RESET}")
+        sys.exit(1)
 
     set_window_size(110, 40)
     show_title()
@@ -29,17 +49,77 @@ def main():
 
     start_time = time.time()
 
+    # If using default template, we should NOT overwrite it.
+    # Instead, we create a new output file name based on the Data file name.
+    # E.g. "Data_Dec12.xlsx" -> "LKS_Dec12.xlsm"
+    
+    # Logic:
+    # 1. If user provided 2nd arg explicitly, we assume they MIGHT want to overwrite it (or we can still treat it as "Template to Load"). 
+    #    Actually current logic was: arg2 IS the file effectively modified.
+    #    The user said: "just write python main.py data.xlsx and it generates a new LKS file".
+    
+    # So:
+    # Template Input = template_path (from arg or default)
+    # Output File = ?
+    
+    # Let's derive output name from Data file name, in the same folder as Data file.
+    # "LKS Final <DataName>.xlsm"
+    
+    output_name = f"LKS ({data_path.stem}).xlsm"
+    output_path = data_path.parent / output_name
+
+    print(f"{CYAN}OUTPUT    : {RESET}{output_path}\n")
+
+    start_time = time.time()
+
     # -----------------------------------------------------
     # INIT HANDLER
     # -----------------------------------------------------
-    handler = ExcelHandler(template_path)
-    handler.load() # Opens Workbook
+    # We load the template, but save to output_path
+    handler = ExcelHandler(template_path, output_path=output_path)
+    handler.load() # Opens Workbook from template_path
+    
+    # -----------------------------------------------------
+    # PREPROCESS RAW DATA (IF .XLS)
+    # -----------------------------------------------------
+    source_path = data_path
+    source_sheet = None
+    
+    # Check for legacy excel extension (.xls)
+    if data_path.suffix.lower() == ".xls":
+        print(f"{CYAN}› Detected Legacy Raw File (.xls). cleaning...{RESET}")
+        try:
+            clean_df = Preprocessor.clean_raw_data(data_path)
+            raw_sheet_name = Preprocessor.insert_clean_data(handler, clean_df)
+            
+            # Save intermediate to allow Pandas to read the new sheet
+            print(f"{DIM}  Saving intermediate cleaned data...{RESET}")
+            handler.save() 
+            
+            # RELOAD HANDLER to avoid "I/O operation on closed file" error with images
+            # The first save might close image file handles from the template.
+            # Since we just saved to output_path, we load from there now.
+            handler = ExcelHandler(output_path)
+            handler.load()
+            
+            # Update pointers
+            source_path = output_path
+            source_sheet = raw_sheet_name
+            print(f"{GREEN}  Cleaned data saved to sheet '{raw_sheet_name}' in output.{RESET}\n")
+            
+        except ImportError as e:
+            print(f"{RED}Error: {e}{RESET}")
+            sys.exit(1)
+        except Exception as e:
+             print(f"{RED}Preprocessor Error: {e}{RESET}")
+             sys.exit(1)
 
     # -----------------------------------------------------
     # STEP 1 — PROCESS DATA
     # -----------------------------------------------------
     print(f"{CYAN}› Reading RAW Data...{RESET}")
-    claim_rows, stats = ClaimService.build_rows(data_path)
+    # Read from source_path (either original or the intermediate cleaned one)
+    claim_rows, stats = ClaimService.build_rows(source_path, sheet_name=source_sheet)
 
     print(f"{DIM}  • SOs after TRAS removal     : {RESET}{GREEN}{stats['sos_after_tras']}{RESET}")
     print(f"{DIM}  • Duplicates skipped in RAW  : {RESET}{GREEN}{stats['duplicates_skipped']}{RESET}")
@@ -104,7 +184,7 @@ def main():
     # Note: ImageInjector currently processes the 'new_rows' theoretically, 
     # but the implementation scans the WHOLE sheet range for safety/robustness.
     # To match old behavior, pass callback.
-    ImageInjector.run(handler, data_path, progress_cb=img_progress)
+    ImageInjector.run(handler, source_path, progress_cb=img_progress, sheet_name=source_sheet)
     print("\n\n")
 
     # -----------------------------------------------------
@@ -146,7 +226,7 @@ def main():
             "Total defective rows": len(missing),
             "Execution time": f"{elapsed:.2f}s",
         },
-        str(template_path),
+        str(output_path),
     )
 
 if __name__ == "__main__":

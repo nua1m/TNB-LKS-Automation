@@ -1,0 +1,7 @@
+pandas
+openpyxl
+rich
+pillow
+xlwings
+requests
+beautifulsoup4

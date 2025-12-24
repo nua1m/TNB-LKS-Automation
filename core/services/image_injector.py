@@ -15,9 +15,21 @@ class ImageInjector:
         return None
 
     @staticmethod
-    def build_url_map(data_path):
+    def build_url_map(data_path, sheet_name=None):
         """Reads raw data and maps SO -> {old, card, new} URLs."""
-        df = pd.read_excel(data_path, dtype=str).fillna("")
+        # Need to fix circular import or just move import? Config is fine.
+        from config import DATA_SHEET_NAME 
+        target_sheet = sheet_name if sheet_name else (DATA_SHEET_NAME if DATA_SHEET_NAME else 0)
+
+        df = pd.read_excel(data_path, sheet_name=target_sheet, dtype=str).fillna("")
+        
+        # Normalize Columns (Handle Preprocessor Uppercase output)
+        df = df.rename(columns={
+            "3MS SO NO.": COL_3MS_SO, "3MS SO NO": COL_3MS_SO,
+            "ATTACHMENTS URL": COL_ATTACH_URL, "ATTACHMENTS URL": COL_ATTACH_URL,
+            "ATTACHMENT URL": COL_ATTACH_URL,
+        })
+        
         # Forward fill SO numbers as per original logic
         df[COL_3MS_SO] = df[COL_3MS_SO].replace("", pd.NA).ffill()
         
@@ -28,7 +40,10 @@ class ImageInjector:
             if not so or not url: continue
 
             if so not in url_map:
-                url_map[so] = {"old": None, "card": None, "new": None}
+                url_map[so] = {"old": None, "card": None, "new": None, "first": None}
+            
+            if url_map[so]["first"] is None:
+                url_map[so]["first"] = url
             
             t = ImageInjector.detect_type(url)
             if t and url_map[so][t] is None:
@@ -49,10 +64,10 @@ class ImageInjector:
         cell.data_type = "f"
 
     @staticmethod
-    def run(handler, data_path, progress_cb=None):
+    def run(handler, data_path, progress_cb=None, sheet_name=None):
         """Injects image formulas into Attachment sheet."""
         data_path = str(data_path) # pandas needs string
-        url_map = ImageInjector.build_url_map(data_path)
+        url_map = ImageInjector.build_url_map(data_path, sheet_name=sheet_name)
         
         wsA = handler.ws_attach
         last_row = wsA.max_row
@@ -69,7 +84,8 @@ class ImageInjector:
             idx += 1
             imgs = url_map.get(so, {})
             
-            ImageInjector.set_formula(wsA.cell(r, col_old), ImageInjector.img_formula(imgs.get("old")))
+            old_url = imgs.get("old") or imgs.get("first")
+            ImageInjector.set_formula(wsA.cell(r, col_old), ImageInjector.img_formula(old_url))
             ImageInjector.set_formula(wsA.cell(r, col_card), ImageInjector.img_formula(imgs.get("card")))
             ImageInjector.set_formula(wsA.cell(r, col_new), ImageInjector.img_formula(imgs.get("new")))
 
