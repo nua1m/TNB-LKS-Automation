@@ -51,4 +51,6 @@ SERVICE_ORDER_COL_IDX = 2    # Column B in CLAIM/ATTACHMENT
 # OTHER CONSTANTS
 # ================================================================
 # Add more here if other modules need configuration
-DEFAULT_TEMPLATE_PATH = r"C:\Users\syahm\Desktop\TNB_LKS_Dev\v1.4\Data\LKS Template (M).xlsm"
+# Template file should be in the same directory as the script
+import os as _os
+DEFAULT_TEMPLATE_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "LKS Template (M).xlsm")
