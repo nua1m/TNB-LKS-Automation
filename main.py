@@ -124,12 +124,55 @@ def run_process(data_path, target_path=None):
     print(f"{DIM}  • TRAS removed               : {RESET}{GREEN}{stats['tras_removed']}{RESET}\n")
 
     # EXPORT TRAS (If any)
+    # Define Helper early
+    def get_next_empty(ws, col=2):
+        for r in range(3, ws.max_row + 2):
+            if ws.cell(r, col).value in (None, "", " "): return r
+        return ws.max_row + 1
+
+    # EXPORT TRAS (If any)
     if tras_rows:
-        tras_output_name = f"TRAS ({data_path.stem}).xlsx"
+        tras_output_name = f"TRAS ({data_path.stem}).xlsm"
         tras_output_path = data_path.parent / tras_output_name
-        print(f"{CYAN}› Exporting TRAS Data...{RESET}")
-        ClaimService.export_tras(tras_rows, tras_output_path)
-        print()
+        print(f"{CYAN}› Exporting TRAS Report...{RESET}")
+        
+        # TRAS Handler (Append if exists)
+        if tras_output_path.exists():
+            print(f"{DIM}  Appended to existing: {tras_output_path.name}{RESET}")
+            tras_handler = ExcelHandler(tras_output_path, output_path=tras_output_path)
+            tras_handler.load()
+            tras_start_claim = get_next_empty(tras_handler.ws_claim)
+            tras_start_attach = get_next_empty(tras_handler.ws_attach)
+            
+            # Filter duplicates for TRAS?
+            # Assuming we want to avoid duplicates same as main
+            t_existing = set()
+            for r in range(3, tras_handler.ws_claim.max_row + 1):
+                so = clean_so(tras_handler.ws_claim.cell(r, 2).value)
+                if so: t_existing.add(so)
+            tras_rows_final = [r for r in tras_rows if clean_so(r["Service Order"]) not in t_existing]
+        else:
+            print(f"{DIM}  Creating New: {tras_output_path.name}{RESET}")
+            tras_handler = ExcelHandler(template_path, output_path=tras_output_path)
+            tras_handler.load()
+            tras_start_claim = 3
+            tras_start_attach = 3
+            tras_rows_final = tras_rows
+
+        if tras_rows_final:
+            ClaimService.write_data(tras_handler, tras_rows_final, tras_start_claim, tras_start_attach)
+            
+            # Inject Images (Same Source)
+            print(f"{DIM}  Injecting Images for TRAS...{RESET}")
+            ImageInjector.run(tras_handler, source_path, sheet_name=source_sheet)
+            
+            tras_handler.save()
+            tras_handler.close()
+            print(f"{GREEN}  TRAS Report saved!{RESET}\n")
+        else:
+            print(f"{YELLOW}  TRAS Data duplicated/empty. Skipped save.{RESET}\n")
+            if tras_output_path.exists(): tras_handler.close()
+
 
     # -----------------------------------------------------
     # STEP 2 — FILTER NEW ROWS
@@ -158,10 +201,7 @@ def run_process(data_path, target_path=None):
     print(f"{CYAN}› Writing CLAIM & ATTACHMENT...{RESET}")
     
     # Determine start rows
-    def get_next_empty(ws, col=2):
-        for r in range(3, ws.max_row + 2):
-            if ws.cell(r, col).value in (None, "", " "): return r
-        return ws.max_row + 1
+
 
     start_claim = get_next_empty(handler.ws_claim)
     start_attach = get_next_empty(handler.ws_attach)

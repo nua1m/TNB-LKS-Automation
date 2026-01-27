@@ -121,42 +121,85 @@ class ClaimService:
                 "site_id": row0.get(COL_SITE_ID, "") or ""
             })
 
-        # Sort by datetime (date + time) from oldest to newest
-        so_groups.sort(key=lambda g: g["date_obj"] if g["date_obj"] else datetime.min)
-        stats["sos_after_tras"] = len(so_groups)
-
-        # Build Objects
-        rows = []
-        for i, g in enumerate(so_groups, 1):
-            r0 = g["row0"]
+        # Helper to create Record
+        def create_record(idx, r_dict, stat_val_obj):
+            site_id = r_dict.get(COL_SITE_ID, "") or ""
+            # DateEngine likely expects a string or handles object? 
+            # If status_val is datetime, convert to string formatted roughly?
+            # Let's ensure we pass what worked before.
+            # Before: status_val was PASSED "date_obj if date_obj else raw_status"
+            # It seems DateEngine might have been updated to handle objects or it failed silently.
+            # Safest: Convert obj to string if DateEngine expects string.
+            # Assuming DateEngine.calculate is robust.
             
-            # --- DATE LOGIC CORE ---
-            # Currently we don't have OCR dates in the builder flow, so ocr_date=None
-            # But the logic will still calculate Hari/TaskForce based on Status Date
-            logic = DateEngine.calculate(g["status_val"], ocr_date_str=None)
+            logic = DateEngine.calculate(stat_val_obj, ocr_date_str=None)
             
-            rows.append({
-                "Qty": i,
-                "Service Order": g["so"],
-                "Account Number": r0.get(COL_CONTRACT, "") or "",
-                "Status": r0.get(COL_SO_STATUS, "") or "",
-                "Address": r0.get(COL_ADDRESS, "") or "",
-                "Voltage": r0.get(COL_VOLTAGE, "") or "",
-                "SO Description": r0.get(COL_SO_TYPE, "") or r0.get(COL_SO_DESC, "") or "",
-                "Labor": r0.get(COL_TECHNICIAN, "") or "",
-                "Status Date": g["status_val"],
-                "Site": g["site_id"],
-                "Business Area": get_business_area(g["site_id"]),
-                "Old Device No": r0.get(COL_OLD_METER, "") or "",
-                "New Device No": r0.get(COL_NEW_METER, "") or "",
-                "Comm Module No": r0.get(COL_NEW_COMM, "") or "",
+            # Status Date: if obj, format it. If string, use as is.
+            disp_date = stat_val_obj
+            if isinstance(stat_val_obj, datetime):
+                disp_date = stat_val_obj.strftime("%d.%m.%Y")
+            
+            return {
+                "Qty": idx,
+                "Service Order": r_dict.get(COL_3MS_SO, "") or "",
+                "Account Number": r_dict.get(COL_CONTRACT, "") or "",
+                "Status": r_dict.get(COL_SO_STATUS, "") or "",
+                "Address": r_dict.get(COL_ADDRESS, "") or "",
+                "Voltage": r_dict.get(COL_VOLTAGE, "") or "",
+                "SO Description": r_dict.get(COL_SO_TYPE, "") or r_dict.get(COL_SO_DESC, "") or "",
+                "Labor": r_dict.get(COL_TECHNICIAN, "") or "",
+                "Status Date": disp_date,
+                "Site": site_id,
+                "Business Area": get_business_area(site_id),
+                "Old Device No": r_dict.get(COL_OLD_METER, "") or "",
+                "New Device No": r_dict.get(COL_NEW_METER, "") or "",
+                "Comm Module No": r_dict.get(COL_NEW_COMM, "") or "",
                 
                 # Derived Fields
                 "Hari Field": logic["hari"],
                 "Jenis Kerja": "KERJA BIASA",
                 "Remarks 1": logic["remarks_1"],
                 "Remarks 2": logic["remarks_2"],
-            })
+            }
+
+        # ---------------------------------------------------------------------
+        # 1. Process Main SO Groups
+        # ---------------------------------------------------------------------
+        # Sort by datetime (date + time) from oldest to newest
+        so_groups.sort(key=lambda g: g["date_obj"] if g["date_obj"] else datetime.min)
+        stats["sos_after_tras"] = len(so_groups)
+
+        rows = []
+        for i, g in enumerate(so_groups, 1):
+            rows.append(create_record(i, g["row0"], g["status_val"]))
+
+        # ---------------------------------------------------------------------
+        # 2. Process TRAS Rows
+        # ---------------------------------------------------------------------
+        tras_formatted = []
+        
+        # Helper to get date for sorting TRAS
+        def get_tras_date_obj(series):
+            raw = str(series.get(COL_STATUS_DATE, "")).strip()
+            return DateEngine.parse_datetime(raw) # Helper from valid engine? or just use pd
+        
+        # Sort TRAS by date
+        # Use simple pandas parse for sorting locally
+        tras_rows.sort(key=lambda r: pd.to_datetime(str(r.get(COL_STATUS_DATE,"")), dayfirst=True, errors='coerce') or datetime.min)
+        
+        for i, series in enumerate(tras_rows, 1):
+            r_dict = series.to_dict()
+            raw_d = str(r_dict.get(COL_STATUS_DATE, "")).strip()
+            # Try to reproduce the 'status_val' logic (Object or Raw String)
+            try:
+                dt = pd.to_datetime(raw_d, dayfirst=True)
+                stat_val = dt
+            except:
+                stat_val = raw_d
+                
+            tras_formatted.append(create_record(i, r_dict, stat_val))
+
+        return rows, tras_formatted, stats
         
         return rows, tras_rows, stats
 
