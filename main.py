@@ -15,28 +15,38 @@ from core.services.claim_service import ClaimService
 from core.services.image_injector import ImageInjector
 from core.services.quality_control import QualityControl
 from core.services.preprocessor import Preprocessor
+from core.services.summary_service import SummaryService
 
 def main():
     if len(sys.argv) < 2:
         print("Usage: python main.py <data.xlsx> [template.xlsx]")
         sys.exit(1)
 
+    # ARGS:
+    # 1. Data File (Required)
+    # 2. Output/Master File (Optional) - If provided, we try to append to this.
+    
     data_path = Path(sys.argv[1]).resolve()
     
+    # OUTPUT NAME LOGIC
     if len(sys.argv) >= 3:
-        template_path = Path(sys.argv[2]).resolve()
+        # User specified target file (e.g. "LKS Jan.xlsm")
+        output_path = Path(sys.argv[2]).resolve()
     else:
-        # Use default template from config
-        from config import DEFAULT_TEMPLATE_PATH
-        # Try to resolve relative to current dir, then relative to project root if needed
-        # Assuming run from root
-        template_path = Path(DEFAULT_TEMPLATE_PATH).resolve()
-        
-        if not template_path.exists():
-             # Fallback: check if it's in the current dir directly
-             if Path(DEFAULT_TEMPLATE_PATH).name in [p.name for p in Path.cwd().glob("*")]:
-                 template_path = Path(Path(DEFAULT_TEMPLATE_PATH).name).resolve()
-                 
+        # Default: "LKS ({DataName}).xlsm" in same folder as Data
+        output_name = f"LKS ({data_path.stem}).xlsm"
+        output_path = data_path.parent / output_name
+
+    # TEMPLATE LOGIC
+    # Always try default template first since we rarely change it via CLI now
+    from config import DEFAULT_TEMPLATE_PATH
+    template_path = Path(DEFAULT_TEMPLATE_PATH).resolve()
+    
+    if not template_path.exists():
+         # Fallback: check if it's in the current dir directly
+         if Path(DEFAULT_TEMPLATE_PATH).name in [p.name for p in Path.cwd().glob("*")]:
+             template_path = Path(Path(DEFAULT_TEMPLATE_PATH).name).resolve()
+             
     if not template_path.exists():
         print(f"{RED}Error: Template file not found: {template_path}{RESET}")
         sys.exit(1)
@@ -45,39 +55,32 @@ def main():
     show_title()
 
     print(f"{CYAN}RAW       : {RESET}{data_path}")
+    if output_path.exists():
+        print(f"{CYAN}TARGET    : {RESET}{output_path} (Append Mode)")
+    else:
+        print(f"{CYAN}TARGET    : {RESET}{output_path} (New File)")
     print(f"{CYAN}TEMPLATE  : {RESET}{template_path}\n")
-
-    start_time = time.time()
-
-    # If using default template, we should NOT overwrite it.
-    # Instead, we create a new output file name based on the Data file name.
-    # E.g. "Data_Dec12.xlsx" -> "LKS_Dec12.xlsm"
-    
-    # Logic:
-    # 1. If user provided 2nd arg explicitly, we assume they MIGHT want to overwrite it (or we can still treat it as "Template to Load"). 
-    #    Actually current logic was: arg2 IS the file effectively modified.
-    #    The user said: "just write python main.py data.xlsx and it generates a new LKS file".
-    
-    # So:
-    # Template Input = template_path (from arg or default)
-    # Output File = ?
-    
-    # Let's derive output name from Data file name, in the same folder as Data file.
-    # "LKS Final <DataName>.xlsm"
-    
-    output_name = f"LKS ({data_path.stem}).xlsm"
-    output_path = data_path.parent / output_name
-
-    print(f"{CYAN}OUTPUT    : {RESET}{output_path}\n")
 
     start_time = time.time()
 
     # -----------------------------------------------------
     # INIT HANDLER
     # -----------------------------------------------------
-    # We load the template, but save to output_path
-    handler = ExcelHandler(template_path, output_path=output_path)
-    handler.load() # Opens Workbook from template_path
+    # Logic: If output_path exists, we LOAD it (Append Mode).
+    # If not, we load TEMPLATE and save to output_path (Create Mode).
+    
+    append_mode = False
+    
+    if output_path.exists():
+        print(f"{YELLOW}› Output file exists. Switching to APPEND MODE.{RESET}")
+        print(f"{DIM}  Loading: {output_path.name}{RESET}")
+        handler = ExcelHandler(output_path, output_path=output_path)
+        handler.load()
+        append_mode = True
+    else:
+        print(f"{GREEN}› Creating NEW Report.{RESET}")
+        handler = ExcelHandler(template_path, output_path=output_path)
+        handler.load() # Opens Workbook from template_path
     
     # -----------------------------------------------------
     # PREPROCESS RAW DATA (IF .XLS)
@@ -119,11 +122,19 @@ def main():
     # -----------------------------------------------------
     print(f"{CYAN}› Reading RAW Data...{RESET}")
     # Read from source_path (either original or the intermediate cleaned one)
-    claim_rows, stats = ClaimService.build_rows(source_path, sheet_name=source_sheet)
+    claim_rows, tras_rows, stats = ClaimService.build_rows(source_path, sheet_name=source_sheet)
 
     print(f"{DIM}  • SOs after TRAS removal     : {RESET}{GREEN}{stats['sos_after_tras']}{RESET}")
     print(f"{DIM}  • Duplicates skipped in RAW  : {RESET}{GREEN}{stats['duplicates_skipped']}{RESET}")
     print(f"{DIM}  • TRAS removed               : {RESET}{GREEN}{stats['tras_removed']}{RESET}\n")
+
+    # EXPORT TRAS (If any)
+    if tras_rows:
+        tras_output_name = f"TRAS ({data_path.stem}).xlsx"
+        tras_output_path = data_path.parent / tras_output_name
+        print(f"{CYAN}› Exporting TRAS Data...{RESET}")
+        ClaimService.export_tras(tras_rows, tras_output_path)
+        print()
 
     # -----------------------------------------------------
     # STEP 2 — FILTER NEW ROWS
@@ -207,6 +218,16 @@ def main():
 
     QualityControl.mark_defective(handler, missing)
     QualityControl.format_all(handler)
+
+    QualityControl.mark_defective(handler, missing)
+    QualityControl.format_all(handler)
+    
+    # -----------------------------------------------------
+    # STEP 6a — UPDATE SUMMARY SHEET
+    # -----------------------------------------------------
+    # We update the summary based on the FINAL state of Claim sheet
+    print(f"{CYAN}› Updating Summary Sheet...{RESET}")
+    SummaryService.update_summary(handler)
 
     print("› Saving Workbook...")
     handler.save()

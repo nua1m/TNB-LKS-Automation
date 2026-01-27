@@ -74,6 +74,7 @@ class ClaimService:
         }
 
         so_groups = []
+        tras_rows = []
         seen = set()
 
         for so, subdf in df.groupby(COL_3MS_SO, sort=False):
@@ -89,6 +90,8 @@ class ClaimService:
             if COL_USER_STATUS in subdf.columns:
                 if subdf[COL_USER_STATUS].astype(str).str.upper().str.contains("TRAS").any():
                     stats["tras_removed"] += 1
+                    # Capture first row of TRAS group (simplest approach)
+                    tras_rows.append(subdf.iloc[0])
                     continue
             
             # Use first row of the group
@@ -155,7 +158,19 @@ class ClaimService:
                 "Remarks 2": logic["remarks_2"],
             })
         
-        return rows, stats
+        return rows, tras_rows, stats
+
+    @staticmethod
+    def export_tras(tras_rows, output_path):
+        """Writes TRAS rows to a separate Excel file."""
+        if not tras_rows: return
+        
+        # We export essentially the raw columns for TRAS rows
+        df = pd.DataFrame(tras_rows)
+        # Clean up: If they are pandas Series, DataFrame constructor works fine.
+        
+        print(f"  Writing {len(tras_rows)} TRAS rows to {output_path.name}...")
+        df.to_excel(output_path, index=False)
 
     @staticmethod
     def write_data(handler, rows, start_claim=3, start_attach=3):

@@ -38,6 +38,7 @@ COL_ATTACH_URL   = "Attachments URL"   # Your column R
 # ================================================================
 CLAIM_SHEET_NAME      = "CLAIM"
 ATTACH_SHEET_NAME     = "ATTACHMENT"
+SUMMARY_SHEET_NAME    = "SUMMARY"
 
 
 # ================================================================
