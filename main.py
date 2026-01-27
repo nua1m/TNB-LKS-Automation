@@ -213,6 +213,24 @@ def main():
     handler.close()
 
     # -----------------------------------------------------
+    # STEP 6b — ENABLE EXTERNAL CONTENT (Excel COM)
+    # This opens the file in Excel and refreshes to activate IMAGE formulas
+    # -----------------------------------------------------
+    try:
+        import win32com.client as win32
+        print(f"{DIM}› Activating external content...{RESET}")
+        excel = win32.gencache.EnsureDispatch('Excel.Application')
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        wb = excel.Workbooks.Open(str(output_path), UpdateLinks=3)  # 3 = always update
+        wb.RefreshAll()
+        wb.Save()
+        wb.Close()
+        print(f"{GREEN}  External content activated!{RESET}")
+    except Exception as e:
+        print(f"{YELLOW}  Note: Could not auto-refresh. Open file in Excel and click 'Enable Content'.{RESET}")
+
+    # -----------------------------------------------------
     # STEP 7 — SUMMARY
     # -----------------------------------------------------
     elapsed = time.time() - start_time

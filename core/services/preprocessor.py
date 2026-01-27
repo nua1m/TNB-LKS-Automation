@@ -26,21 +26,22 @@ class Preprocessor:
         wb = None
         try:
             print(f"  Converting {Path(file_path).name} to .xlsx format...")
-            wb = excel.Workbooks.Open(file_path)
+            # CorruptLoad=1 helps with problematic/older files
+            wb = excel.Workbooks.Open(file_path, UpdateLinks=0, CorruptLoad=1)
             # FileFormat=51 is xlOpenXMLWorkbook (.xlsx)
             wb.SaveAs(temp_xlsx, FileFormat=51)
-            wb.Close()
+            wb.Close(SaveChanges=False)
         except Exception as e:
             print(f"Excel Conversion Failed: {e}")
-            # If conversion fails, maybe we can't do anything. Rethrow.
-            if wb: wb.Close(SaveChanges=False)
+            if wb: 
+                try: wb.Close(SaveChanges=False)
+                except: pass
             raise e
         finally:
-            # We don't quit Excel because user might have it open, just close our WB.
-            # Actually, if we launched it invisible, good etiquette is to quit if we started it?
-            # Safe bet: just leave it running or rely on it being background. 
-            # Re-using existing instance is default behavior of Dispatch.
-            pass
+            try:
+                excel.Quit()
+            except:
+                pass
 
         # 2. Read the new clean XLSX
         try:
@@ -136,10 +137,11 @@ class Preprocessor:
                 
         # Apply Logic:
         # User: "now in column r ... links. put image formula in column s"
-        # Col R is index 18. Col S is index 19.
+        # IMPORTANT: After dropping Column D, indices shift by 1!
+        # Original Col R (18) is now at index 17. Col S (19) is now at 18.
         
-        link_col_idx = 18 # R
-        img_col_idx = 19  # S
+        link_col_idx = 17 # R (after D dropped)
+        img_col_idx = 18  # S (after D dropped)
         
         # 1. Rename Column S Header
         ws.cell(row=1, column=img_col_idx).value = "IMAGES"

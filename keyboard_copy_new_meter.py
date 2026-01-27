@@ -23,11 +23,11 @@ def wait(sec=SHORT):
 def key(k, times=1):
     for _ in range(times):
         pyautogui.press(k)
-        wait(TINY)
+        wait(MEDIUM)
 
 def hotkey(*keys):
     pyautogui.hotkey(*keys)
-    wait(SHORT)
+    wait(MEDIUM)
 
 def copy_image(image_type):
     """
@@ -50,11 +50,11 @@ def copy_image(image_type):
     hotkey('ctrl', 'f')
     wait(MEDIUM)
     hotkey('ctrl', 'v')  # Paste SO
-    wait(SHORT)
+    wait(MEDIUM)
     key('enter')  # Find
     wait(MEDIUM)
     key('escape')  # Close Find
-    wait(SHORT)
+    wait(MEDIUM)
     
     # 4. Now search for the keyword (card or new_meter) within this area
     hotkey('ctrl', 'f')
@@ -62,16 +62,16 @@ def copy_image(image_type):
     
     # Type the keyword
     pyautogui.typewrite(keyword, interval=0.03)
-    wait(SHORT)
+    wait(MEDIUM)
     key('enter')  # Find
     wait(MEDIUM)
     key('escape')  # Close Find
-    wait(SHORT)
+    wait(MEDIUM)
     
     # 5. We should now be on the URL column (C) with the keyword
     # Go LEFT to Column B where the image is
     key('left', times=1)  # C -> B
-    wait(SHORT)
+    wait(MEDIUM)
     
     # 6. Copy the image cell
     hotkey('ctrl', 'c')
@@ -83,7 +83,7 @@ def copy_image(image_type):
     
     # 8. Navigate to target column (E or F)
     key('right', times=target_col_offset)
-    wait(SHORT)
+    wait(MEDIUM)
     
     # 9. Paste with Ctrl+V
     hotkey('ctrl', 'v')
@@ -91,18 +91,18 @@ def copy_image(image_type):
     
     # 10. Return to Column B (SO column)
     key('left', times=target_col_offset)
-    wait(SHORT)
+    wait(MEDIUM)
     
     print(f"    ✓ {image_type} done!")
 
 def process_row():
     """Process new_meter only for current row."""
     copy_image('new')  # This will use 'new_meter' keyword
-    wait(SHORT)
+    wait(MEDIUM)
     
     # Move to next row
     key('down')
-    wait(SHORT)
+    wait(MEDIUM)
 
 def main():
     print("=" * 50)

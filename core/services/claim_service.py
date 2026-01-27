@@ -107,7 +107,7 @@ class ClaimService:
             
             if not date_obj and str(raw_status).strip():
                 stats["invalid_dates"] += 1
-            if not (row0.get(COL_ADDRESS, "") or "").strip():
+            if not str(row0.get(COL_ADDRESS, "") or "").strip():
                 stats["missing_address"] += 1
 
             so_groups.append({
@@ -118,7 +118,8 @@ class ClaimService:
                 "site_id": row0.get(COL_SITE_ID, "") or ""
             })
 
-        so_groups.sort(key=lambda g: (g["date_obj"].date() if g["date_obj"] else datetime.min.date()))
+        # Sort by datetime (date + time) from oldest to newest
+        so_groups.sort(key=lambda g: g["date_obj"] if g["date_obj"] else datetime.min)
         stats["sos_after_tras"] = len(so_groups)
 
         # Build Objects
