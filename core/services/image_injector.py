@@ -9,9 +9,30 @@ class ImageInjector:
     def detect_type(url: str) -> str | None:
         if not url: return None
         u = url.lower()
-        if "old_read" in u: return "old"
-        if "card" in u: return "card"
-        if "new_meter" in u: return "new"
+        filename = u.split("/")[-1] # Focus on filename to avoid matching domain/path parts
+        
+        # OLD READ
+        # Standard: old_read
+        # Typos: oldread, old_red, old_rea
+        if any(x in filename for x in ["old_read", "oldread", "old_red", "old_rea"]):
+            return "old"
+            
+        # CARD
+        # Standard: card
+        # Typos: cad, crd, car, ard (User explicitly requested car, ard)
+        if any(x in filename for x in ["card", "cad", "crd", "car", "ard"]):
+            return "card"
+        
+        # NEW METER
+        # Standard: new_meter
+        # Typos: newmeter, new_meer, new_mter, new_metr, nee_meter
+        if any(x in filename for x in ["new_meter", "newmeter", "nee_meter"]):
+            return "new"
+            
+        # Fallback fuzzy for new meter: "new_m" + something looking like meter
+        if "new_m" in filename and ("eer" in filename or "ter" in filename or "etr" in filename): 
+            return "new"
+        
         return None
 
     @staticmethod
@@ -23,15 +44,41 @@ class ImageInjector:
 
         df = pd.read_excel(data_path, sheet_name=target_sheet, dtype=str).fillna("")
         
-        # Normalize Columns (Handle Preprocessor Uppercase output)
-        df = df.rename(columns={
-            "3MS SO NO.": COL_3MS_SO, "3MS SO NO": COL_3MS_SO,
-            "ATTACHMENTS URL": COL_ATTACH_URL, "ATTACHMENTS URL": COL_ATTACH_URL,
-            "ATTACHMENT URL": COL_ATTACH_URL,
-        })
+        # Normalize Columns: Strip and Upper
+        df.columns = [str(c).strip().upper() for c in df.columns]
+        
+        # Mapping: keys must be UPPERCASE versions of expected headers
+        # COL_3MS_SO might be "3MS SO No." -> "3MS SO NO."
+        target_so = COL_3MS_SO.upper()
+        target_url = COL_ATTACH_URL.upper() # "ATTACHMENTS URL"
+        
+        # Rename map
+        # We want the final DataFrame to have COL_3MS_SO and COL_ATTACH_URL (Original Mixed Case)
+        # So we map UPPER -> Original
+        
+        rename_map = {}
+        
+        # Find matches for SO
+        for c in df.columns:
+            if c in ["3MS SO NO.", "3MS SO NO", "SO NUMBER", target_so]:
+                rename_map[c] = COL_3MS_SO
+            elif c in ["ATTACHMENTS URL", "ATTACHMENT URL", "ATTACHMENT_URL", target_url]:
+                rename_map[c] = COL_ATTACH_URL
+                
+        df = df.rename(columns=rename_map)
+        
+        # Debugging check
+        if COL_3MS_SO not in df.columns or COL_ATTACH_URL not in df.columns:
+            print(f"Warning: Columns not found. Available: {df.columns.tolist()}")
+            # Fallback: try by index?
+            # URL is usually last or 2nd to last?
+            # Let's rely on standard names for now.
         
         # Forward fill SO numbers as per original logic
-        df[COL_3MS_SO] = df[COL_3MS_SO].replace("", pd.NA).ffill()
+        if COL_3MS_SO in df.columns:
+            df[COL_3MS_SO] = df[COL_3MS_SO].replace("", pd.NA).ffill()
+        else:
+            return {} # Can't map without SO
         
         url_map = {}
         for _, row in df.iterrows():
