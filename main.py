@@ -11,27 +11,22 @@ from core.excel_handler import ExcelHandler
 from core.so_utils import clean_so
 from core.services.claim_service import ClaimService
 from core.services.image_injector import ImageInjector
-from core.services.claim_service import ClaimService
-from core.services.image_injector import ImageInjector
 from core.services.quality_control import QualityControl
 from core.services.preprocessor import Preprocessor
 from core.services.summary_service import SummaryService
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <data.xlsx> [template.xlsx]")
-        sys.exit(1)
-
-    # ARGS:
-    # 1. Data File (Required)
-    # 2. Output/Master File (Optional) - If provided, we try to append to this.
-    
-    data_path = Path(sys.argv[1]).resolve()
+def run_process(data_path, target_path=None):
+    """
+    Core automation logic. 
+    data_path: Path to raw data (str or Path)
+    target_path: Path to existing master file (str or Path), optional.
+    """
+    data_path = Path(data_path).resolve()
     
     # OUTPUT NAME LOGIC
-    if len(sys.argv) >= 3:
+    if target_path:
         # User specified target file (e.g. "LKS Jan.xlsm")
-        output_path = Path(sys.argv[2]).resolve()
+        output_path = Path(target_path).resolve()
     else:
         # Default: "LKS ({DataName}).xlsm" in same folder as Data
         output_name = f"LKS ({data_path.stem}).xlsm"
@@ -49,7 +44,7 @@ def main():
              
     if not template_path.exists():
         print(f"{RED}Error: Template file not found: {template_path}{RESET}")
-        sys.exit(1)
+        return # Return instead of exit for GUI
 
     set_window_size(110, 40)
     show_title()
@@ -112,10 +107,10 @@ def main():
             
         except ImportError as e:
             print(f"{RED}Error: {e}{RESET}")
-            sys.exit(1)
+            return
         except Exception as e:
              print(f"{RED}Preprocessor Error: {e}{RESET}")
-             sys.exit(1)
+             return
 
     # -----------------------------------------------------
     # STEP 1 — PROCESS DATA
@@ -149,11 +144,8 @@ def main():
     new_rows = [r for r in claim_rows if clean_so(r["Service Order"]) not in existing_sos]
 
     if existing_sos:
-        print(f"{YELLOW}The LKS already contains data. Continue adding new SOs? (y/n){RESET}")
-        if input(">> ").strip().lower() != "y":
-            print(f"{RED}Aborted.{RESET}")
-            handler.close()
-            return
+        # For CLI we might prompt but for library usage we skip prompt if seemingly automated or append mode valid
+        pass
     
     if not new_rows:
         print(f"{YELLOW}All SOs already exist in TEMPLATE.{RESET}")
@@ -218,9 +210,6 @@ def main():
 
     QualityControl.mark_defective(handler, missing)
     QualityControl.format_all(handler)
-
-    QualityControl.mark_defective(handler, missing)
-    QualityControl.format_all(handler)
     
     # -----------------------------------------------------
     # STEP 6a — UPDATE SUMMARY SHEET
@@ -267,6 +256,16 @@ def main():
         },
         str(output_path),
     )
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python main.py <data.xlsx> [optional output file]")
+        sys.exit(1)
+    
+    data_file = sys.argv[1]
+    target_file = sys.argv[2] if len(sys.argv) >= 3 else None
+    
+    run_process(data_file, target_file)
 
 if __name__ == "__main__":
     main()

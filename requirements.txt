@@ -5,3 +5,5 @@ pillow
 xlwings
 requests
 beautifulsoup4
+customtkinter
+packaging
