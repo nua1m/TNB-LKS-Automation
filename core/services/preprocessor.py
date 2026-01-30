@@ -20,27 +20,14 @@ class Preprocessor:
         
         # 1. Convert to XLSX using Excel App (Handles XML/Format mismatch gracefully)
         try:
-            excel = win32.gencache.EnsureDispatch('Excel.Application')
-        except AttributeError:
-            # Handle win32com cache corruption
-            print(f"  Warning: COM Cache corrupted. Clearing gen_py...")
-            import shutil
-            import sys
-            import win32com
-            if hasattr(win32com, '__gen_path__') and os.path.exists(win32com.__gen_path__):
-                try:
-                    shutil.rmtree(win32com.__gen_path__)
-                    # Re-import to refresh
-                    import importlib
-                    importlib.reload(win32)
-                    excel = win32.gencache.EnsureDispatch('Excel.Application')
-                except Exception as e:
-                     print(f"  Failed to clear cache: {e}")
-                     raise e
-            else:
-                raise
+            # Use dynamic Dispatch to avoid cache issues
+            print(f"  Starting Excel application...")
+            excel = win32.Dispatch('Excel.Application')
+            excel.Visible = False  
+        except Exception as e:
+            print(f"  Critical Error Starting Excel: {e}")
+            raise e
 
-        excel.Visible = False
         excel.DisplayAlerts = False
         
         wb = None
@@ -59,6 +46,7 @@ class Preprocessor:
             raise e
         finally:
             try:
+                # Keep excel open? No, close it.
                 excel.Quit()
             except:
                 pass

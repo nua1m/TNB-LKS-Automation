@@ -21,8 +21,8 @@ class ImageInjector:
             return "card"
         
         # NEW METER
-        # Typos: newmeter, nee_meter, new_meer
-        if any(x in filename for x in ["new_meter", "newmeter", "nee_meter"]):
+        # Typos: newmeter, nee_meter, new_meer, new_metwr
+        if any(x in filename for x in ["new_meter", "newmeter", "nee_meter", "new_metwr"]):
             return "new"
             
         # Fallback fuzzy for new meter
