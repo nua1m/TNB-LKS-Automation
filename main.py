@@ -219,16 +219,34 @@ def main():
     try:
         import win32com.client as win32
         print(f"{DIM}› Activating external content...{RESET}")
-        excel = win32.gencache.EnsureDispatch('Excel.Application')
+        
+        # Use simple Dispatch if possible, or handle cache error
+        try:
+            excel = win32.gencache.EnsureDispatch('Excel.Application')
+        except AttributeError:
+             # If cache is corrupted, just fail gracefully or try Dispatch
+             excel = win32.Dispatch('Excel.Application')
+
         excel.Visible = False
         excel.DisplayAlerts = False
-        wb = excel.Workbooks.Open(str(output_path), UpdateLinks=3)  # 3 = always update
-        wb.RefreshAll()
+        excel.AskToUpdateLinks = False
+        
+        # Open with UpdateLinks=0 (Don't update external links)
+        # We only need internal calculation for IMAGE formulas
+        wb = excel.Workbooks.Open(str(output_path), UpdateLinks=0)
+        
+        # Force Calculation
+        wb.ForceFullCalculation = True
+        
+        # Optional: Wait a bit? No.
         wb.Save()
         wb.Close()
+        excel.Quit()
         print(f"{GREEN}  External content activated!{RESET}")
     except Exception as e:
-        print(f"{YELLOW}  Note: Could not auto-refresh. Open file in Excel and click 'Enable Content'.{RESET}")
+        print(f"{YELLOW}  Note: Could not auto-refresh ({e}). Open file in Excel and click 'Enable Content'.{RESET}")
+        try: excel.Quit()
+        except: pass
 
     # -----------------------------------------------------
     # STEP 7 — SUMMARY
