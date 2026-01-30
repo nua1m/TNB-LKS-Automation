@@ -11,60 +11,41 @@ from core.excel_handler import ExcelHandler
 from core.so_utils import clean_so
 from core.services.claim_service import ClaimService
 from core.services.image_injector import ImageInjector
-from core.services.claim_service import ClaimService
-from core.services.image_injector import ImageInjector
 from core.services.quality_control import QualityControl
 from core.services.preprocessor import Preprocessor
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <data.xlsx> [template.xlsx]")
-        sys.exit(1)
+def run_process(data_path, template_path):
+    # -----------------------------------------------------
+    # LEGACY FILE CHECK (.xls)
+    # -----------------------------------------------------
+    if data_path.suffix.lower() == ".xls":
+        print(f"{CYAN}› Detected Legacy Raw File (.xls). Converting & Cleaning...{RESET}")
+        try:
+            # Overhaul Workflow: Process & Rewrite
+            new_path = Preprocessor.process_legacy_file(data_path)
+            
+            print(f"{GREEN}› Legacy File Processed successfully.{RESET}")
+            print(f"{DIM}  New Input File: {new_path.name}{RESET}")
+            print(f"{CYAN}› Relaunching workflow with the clean file...{RESET}\n")
+            
+            # Recursive Relaunch
+            run_process(new_path, template_path)
+            return
+            
+        except Exception as e:
+            print(f"{RED}Error processing legacy file: {e}{RESET}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
-    data_path = Path(sys.argv[1]).resolve()
+    # -----------------------------------------------------
+    # STANDARD WORKFLOW (.xlsx)
+    # -----------------------------------------------------
+    # If we are here, data_path is .xlsx (either original or converted)
     
-    if len(sys.argv) >= 3:
-        template_path = Path(sys.argv[2]).resolve()
-    else:
-        # Use default template from config
-        from config import DEFAULT_TEMPLATE_PATH
-        # Try to resolve relative to current dir, then relative to project root if needed
-        # Assuming run from root
-        template_path = Path(DEFAULT_TEMPLATE_PATH).resolve()
-        
-        if not template_path.exists():
-             # Fallback: check if it's in the current dir directly
-             if Path(DEFAULT_TEMPLATE_PATH).name in [p.name for p in Path.cwd().glob("*")]:
-                 template_path = Path(Path(DEFAULT_TEMPLATE_PATH).name).resolve()
-                 
-    if not template_path.exists():
-        print(f"{RED}Error: Template file not found: {template_path}{RESET}")
-        sys.exit(1)
-
-    set_window_size(110, 40)
-    show_title()
-
     print(f"{CYAN}RAW       : {RESET}{data_path}")
     print(f"{CYAN}TEMPLATE  : {RESET}{template_path}\n")
 
-    start_time = time.time()
-
-    # If using default template, we should NOT overwrite it.
-    # Instead, we create a new output file name based on the Data file name.
-    # E.g. "Data_Dec12.xlsx" -> "LKS_Dec12.xlsm"
-    
-    # Logic:
-    # 1. If user provided 2nd arg explicitly, we assume they MIGHT want to overwrite it (or we can still treat it as "Template to Load"). 
-    #    Actually current logic was: arg2 IS the file effectively modified.
-    #    The user said: "just write python main.py data.xlsx and it generates a new LKS file".
-    
-    # So:
-    # Template Input = template_path (from arg or default)
-    # Output File = ?
-    
-    # Let's derive output name from Data file name, in the same folder as Data file.
-    # "LKS Final <DataName>.xlsm"
-    
     output_name = f"LKS ({data_path.stem}).xlsm"
     output_path = data_path.parent / output_name
 
@@ -75,50 +56,17 @@ def main():
     # -----------------------------------------------------
     # INIT HANDLER
     # -----------------------------------------------------
-    # We load the template, but save to output_path
     handler = ExcelHandler(template_path, output_path=output_path)
-    handler.load() # Opens Workbook from template_path
+    handler.load() 
     
-    # -----------------------------------------------------
-    # PREPROCESS RAW DATA (IF .XLS)
-    # -----------------------------------------------------
     source_path = data_path
-    source_sheet = None
-    
-    # Check for legacy excel extension (.xls)
-    if data_path.suffix.lower() == ".xls":
-        print(f"{CYAN}› Detected Legacy Raw File (.xls). cleaning...{RESET}")
-        try:
-            clean_df = Preprocessor.clean_raw_data(data_path)
-            raw_sheet_name = Preprocessor.insert_clean_data(handler, clean_df)
-            
-            # Save intermediate to allow Pandas to read the new sheet
-            print(f"{DIM}  Saving intermediate cleaned data...{RESET}")
-            handler.save() 
-            
-            # RELOAD HANDLER to avoid "I/O operation on closed file" error with images
-            # The first save might close image file handles from the template.
-            # Since we just saved to output_path, we load from there now.
-            handler = ExcelHandler(output_path)
-            handler.load()
-            
-            # Update pointers
-            source_path = output_path
-            source_sheet = raw_sheet_name
-            print(f"{GREEN}  Cleaned data saved to sheet '{raw_sheet_name}' in output.{RESET}\n")
-            
-        except ImportError as e:
-            print(f"{RED}Error: {e}{RESET}")
-            sys.exit(1)
-        except Exception as e:
-             print(f"{RED}Preprocessor Error: {e}{RESET}")
-             sys.exit(1)
+    source_sheet = None # Default first sheet
 
     # -----------------------------------------------------
     # STEP 1 — PROCESS DATA
     # -----------------------------------------------------
     print(f"{CYAN}› Reading RAW Data...{RESET}")
-    # Read from source_path (either original or the intermediate cleaned one)
+    # Read from source_path 
     claim_rows, stats = ClaimService.build_rows(source_path, sheet_name=source_sheet)
 
     print(f"{DIM}  • SOs after TRAS removal     : {RESET}{GREEN}{stats['sos_after_tras']}{RESET}")
@@ -138,11 +86,17 @@ def main():
     new_rows = [r for r in claim_rows if clean_so(r["Service Order"]) not in existing_sos]
 
     if existing_sos:
+        # Prompt only if potentially interactive? Or auto-append?
+        # User requested Append Mode before but reverted.
+        # Assuming we stick to "Prompt" logic from main.
         print(f"{YELLOW}The LKS already contains data. Continue adding new SOs? (y/n){RESET}")
-        if input(">> ").strip().lower() != "y":
-            print(f"{RED}Aborted.{RESET}")
-            handler.close()
-            return
+        try:
+           if input(">> ").strip().lower() != "y":
+               print(f"{RED}Aborted.{RESET}")
+               handler.close()
+               return
+        except EOFError:
+           pass # Non-interactive
     
     if not new_rows:
         print(f"{YELLOW}All SOs already exist in TEMPLATE.{RESET}")
@@ -154,7 +108,6 @@ def main():
     # -----------------------------------------------------
     print(f"{CYAN}› Writing CLAIM & ATTACHMENT...{RESET}")
     
-    # Determine start rows
     def get_next_empty(ws, col=2):
         for r in range(3, ws.max_row + 2):
             if ws.cell(r, col).value in (None, "", " "): return r
@@ -177,13 +130,8 @@ def main():
     def img_progress(msg):
         nonlocal img_counter
         img_counter += 1
-        # Use counter % total or simple increment logic depending on how many calls are made
-        # ImageInjector calls this once per row
         step_progress("IMAGES", img_counter, total_imgs, extra=msg, spinner_i=img_counter)
 
-    # Note: ImageInjector currently processes the 'new_rows' theoretically, 
-    # but the implementation scans the WHOLE sheet range for safety/robustness.
-    # To match old behavior, pass callback.
     ImageInjector.run(handler, source_path, progress_cb=img_progress, sheet_name=source_sheet)
     print("\n\n")
 
@@ -214,31 +162,22 @@ def main():
 
     # -----------------------------------------------------
     # STEP 6b — ENABLE EXTERNAL CONTENT (Excel COM)
-    # This opens the file in Excel and refreshes to activate IMAGE formulas
     # -----------------------------------------------------
     try:
         import win32com.client as win32
         print(f"{DIM}› Activating external content...{RESET}")
         
-        # Use simple Dispatch if possible, or handle cache error
         try:
             excel = win32.gencache.EnsureDispatch('Excel.Application')
         except AttributeError:
-             # If cache is corrupted, just fail gracefully or try Dispatch
              excel = win32.Dispatch('Excel.Application')
 
         excel.Visible = False
         excel.DisplayAlerts = False
         excel.AskToUpdateLinks = False
         
-        # Open with UpdateLinks=0 (Don't update external links)
-        # We only need internal calculation for IMAGE formulas
         wb = excel.Workbooks.Open(str(output_path), UpdateLinks=0)
-        
-        # Force Calculation
         wb.ForceFullCalculation = True
-        
-        # Optional: Wait a bit? No.
         wb.Save()
         wb.Close()
         excel.Quit()
@@ -264,6 +203,33 @@ def main():
         },
         str(output_path),
     )
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python main.py <data.xlsx> [template.xlsx]")
+        sys.exit(1)
+
+    data_path = Path(sys.argv[1]).resolve()
+    
+    if len(sys.argv) >= 3:
+        template_path = Path(sys.argv[2]).resolve()
+    else:
+        from config import DEFAULT_TEMPLATE_PATH
+        template_path = Path(DEFAULT_TEMPLATE_PATH).resolve()
+        
+        if not template_path.exists():
+             if Path(DEFAULT_TEMPLATE_PATH).name in [p.name for p in Path.cwd().glob("*")]:
+                 template_path = Path(Path(DEFAULT_TEMPLATE_PATH).name).resolve()
+                 
+    if not template_path.exists():
+        print(f"{RED}Error: Template file not found: {template_path}{RESET}")
+        sys.exit(1)
+
+    set_window_size(110, 40)
+    show_title()
+    
+    run_process(data_path, template_path)
 
 if __name__ == "__main__":
     main()

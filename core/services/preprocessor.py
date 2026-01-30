@@ -4,217 +4,170 @@ from openpyxl.utils import get_column_letter
 
 class Preprocessor:
     @staticmethod
-
-    def clean_raw_data(file_path):
+    def process_legacy_file(file_path):
         """
-        Converts .xls (legacy/XML) to .xlsx using Excel COM interface for robustness,
-        then reads, skips header, drops Col D.
-        Returns: DataFrame ready for insertion.
+        New Workflow:
+        1. Convert .xls -> temp.xlsx
+        2. Open temp.xlsx
+        3. Extract Date (Rows 1-14)
+        4. Clean: Delete Top 14, Col D, Col T, Footer. Unmerge. Resize.
+        5. Save as 'LKS Data (<Date>).xlsx'
+        6. Return new path.
         """
         import win32com.client as win32
+        import shutil
         import os
         from pathlib import Path
+        from openpyxl import load_workbook
+        from openpyxl.utils import get_column_letter
+        import re
         
-        file_path = str(Path(file_path).resolve())
-        temp_xlsx = file_path + "_temp.xlsx"
+        file_path = Path(file_path).resolve()
+        temp_xlsx = file_path.with_name(file_path.stem + "_temp.xlsx")
         
-        # 1. Convert to XLSX using Excel App (Handles XML/Format mismatch gracefully)
+        # 1. Convert to XLSX (Win32Com)
         try:
-            # Use dynamic Dispatch to avoid cache issues
-            print(f"  Starting Excel application...")
+            # Use Dispatch 
             excel = win32.Dispatch('Excel.Application')
-            excel.Visible = False  
-        except Exception as e:
-            print(f"  Critical Error Starting Excel: {e}")
-            raise e
-
-        excel.DisplayAlerts = False
-        
-        wb = None
-        try:
-            print(f"  Converting {Path(file_path).name} to .xlsx format...")
-            # CorruptLoad=1 helps with problematic/older files
-            wb = excel.Workbooks.Open(file_path, UpdateLinks=0, CorruptLoad=1)
-            # FileFormat=51 is xlOpenXMLWorkbook (.xlsx)
-            wb.SaveAs(temp_xlsx, FileFormat=51)
+            excel.Visible = False # Run in background
+            excel.DisplayAlerts = False
+            
+            # CorruptLoad=1 for robustness
+            wb = excel.Workbooks.Open(str(file_path), UpdateLinks=0, CorruptLoad=1)
+            wb.SaveAs(str(temp_xlsx), FileFormat=51) # xlOpenXMLWorkbook
             wb.Close(SaveChanges=False)
         except Exception as e:
-            print(f"Excel Conversion Failed: {e}")
-            if wb: 
-                try: wb.Close(SaveChanges=False)
-                except: pass
+            print(f"  Error converting legacy file: {e}")
             raise e
         finally:
-            try:
-                # Keep excel open? No, close it.
-                excel.Quit()
-            except:
-                pass
+            try: excel.Quit()
+            except: pass
 
-        # 2. Read the new clean XLSX
+        # 2. Open with OpenPyXL
         try:
-            df = pd.read_excel(temp_xlsx, header=14, dtype=str)
-        finally:
-            # Cleanup temp file
-            if os.path.exists(temp_xlsx):
-                os.remove(temp_xlsx)
-                
-        # 3. Clean Columns
-        # Drop Column D (4th column, index 3)
-        if len(df.columns) > 3:
-            df.drop(df.columns[3], axis=1, inplace=True)
+            wb = load_workbook(temp_xlsx)
+            ws = wb.active
             
-        # Remove last 2 rows (unimportant footer)
-        if len(df) > 2:
-            df = df.iloc[:-2]
+            # 3. Extract Date from Metadata (Rows 11 and 12)
+            # User request: "take first date from row 11 and last date from row 12"
+            # Format: (Jan 26 - Jan 30)
             
-        return df
-
-
-    @staticmethod
-    def insert_clean_data(handler, df, sheet_name="RAW_CLEANED"):
-        """
-        Writes the cleaned DataFrame to a new sheet in the workbook.
-        Applies formatting: Col S width 33, Row Height 180.
-        Adds Formula in Col S pointing to Col R.
-        """
-        wb = handler.wb
-        if sheet_name in wb.sheetnames:
-            # If exists, maybe clear it or use it? Let's overwrite/recreate
-            del wb[sheet_name]
-        
-        ws = wb.create_sheet(sheet_name)
-        
-        from openpyxl.styles import Font, Alignment, PatternFill
-        from openpyxl.utils import get_column_letter
-        from datetime import datetime
-        import pandas as pd
-        
-        # Write Header & Data
-        # Apply Styling: Calibri, 7, Center, Middle, Uppercase, Wrap Text
-        # Header Color: Text #333399, White Background (Default)
-        base_font = Font(name='Calibri', size=7)
-        header_font = Font(name='Calibri', size=7, bold=True, color="333399") 
-        # No fill needed if white is desired as default
-        
-        align_style = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        
-        # Identify Status Date Column Index
-        # We need to scan headers first. or rely on DF columns.
-        status_date_col_idx = None
-        for i, col_name in enumerate(df.columns, 1):
-            if "Status Date" in str(col_name):
-                status_date_col_idx = i
-                break
-        
-        for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
-            for c_idx, value in enumerate(row, 1):
-                cell = ws.cell(row=r_idx, column=c_idx)
-                
-                # Header Styling (Row 1)
-                if r_idx == 1:
-                    cell.value = str(value).upper()
-                    cell.font = header_font
-                    # cell.fill = header_fill # Removed
-                else:
-                    # Data Rows
-                    # Special Handling for Status Date
-                    if c_idx == status_date_col_idx:
-                        # Value came from df as string usually. Try to parse it using pandas or dateutil
-                        # User wants: Dec 14, 2025, 5:23PM
-                        # Input might be ISO: 2025-12-14 17:23:42.062000
-                        try:
-                            if value and str(value).strip():
-                                dt_val = pd.to_datetime(value)
-                                cell.value = dt_val
-                                cell.number_format = "d mmm, yyyy, h:mm AM/PM"
-                            else:
-                                cell.value = value
-                        except:
-                            cell.value = value
-                    else:
-                         # Convert to uppercase if string
-                        if isinstance(value, str):
-                            cell.value = value.upper()
-                        else:
-                            cell.value = value
-                            
-                    cell.font = base_font
+            from datetime import datetime
+            import dateutil.parser
+            
+            def find_date_in_row(row_idx):
+                for c in range(1, 20): # Scan first 20 cols
+                    val = str(ws.cell(row_idx, c).value).strip()
+                    if not val or val == "None": continue
                     
-                cell.alignment = align_style
-                
-        # Apply Logic:
-        # User: "now in column r ... links. put image formula in column s"
-        # DYNAMIC SEARCH for URL Column to be safe
-        link_col_idx = 18 # Default fallback (Col R if user says so)
-        
-        # Scan headers in row 1
-        for col in range(1, ws.max_column + 1):
-            val = str(ws.cell(1, col).value).upper()
-            if "URL" in val and "ATTACH" in val:
-                link_col_idx = col
-                break
-        
-        img_col_idx = link_col_idx + 1
-        
-        # 1. Add "IMAGES" Header
-        ws.cell(row=1, column=img_col_idx).value = "IMAGES"
-        ws.cell(row=1, column=img_col_idx).font = header_font
-        ws.cell(row=1, column=img_col_idx).alignment = align_style
-        
-        # 2. Add Images & Formatting
-        ws.column_dimensions[get_column_letter(img_col_idx)].width = 33
-        
-        # Iterate rows (skip header row 1)
-        for r in range(2, ws.max_row + 1):
-            # Set Row Height
-            ws.row_dimensions[r].height = 180
-            
-            # Get Link Value
-            link_val = ws.cell(row=r, column=link_col_idx).value
-            
-            if link_val:
-                formula = f'=_xlfn.IMAGE("{str(link_val).strip()}",,1)'
-                cell = ws.cell(row=r, column=img_col_idx)
-                cell.value = formula
-                # Re-apply styles just in case
-                cell.font = base_font
-                cell.alignment = align_style
-                
-        # 3. Remove Columns T and U (Indices 20, 21)
-        # Check if they exist (ws.max_column might be less if data is small, but safer to call delete)
-        ws.delete_cols(20, 2)
-        
-        # 4. Set Dimensions
-        # Row 1 Height = 25
-        ws.row_dimensions[1].height = 25
-        
-        # Column Widths (Indices 1 to 19)
-        # 12,12,7,7,7,12,7,7,12,12,15,7,12,12,12,12,12,12,33
-        widths = [12, 12, 7, 7, 7, 12, 7, 7, 12, 12, 15, 7, 12, 12, 12, 12, 12, 12, 33]
-        
-        for i, width in enumerate(widths, 1):
-            col_letter = get_column_letter(i)
-            ws.column_dimensions[col_letter].width = width
-            
-        # 5. Hide Unused Columns (T onwards) -> T is 20
-        # Excel typically goes up to XFD (Column 16384).
-        # We can hide 20 to 16384. But iterating is slow.
-        # Efficient way: Group columns.
-        ws.column_dimensions.group(get_column_letter(20), get_column_letter(16384), hidden=True)
-        
-        # 6. Hide Unused Rows
-        # Current used rows = 1 (header) + len(df)
-        last_used_row = 1 + len(df)
-        # Hide from next row to ... arbitrary large number? Or just 200?
-        # User said "hide all rows that come after it".
-        # Hiding to 1048576 is overkill and can bloat file.
-        # Usually checking default view is enough. But we can hide the next 1000.
-        # Or better: Group from last_used+1 to max.
-        
-        # NOTE: OpenPyXL grouping for rows:
-        # ws.row_dimensions.group(start, end, hidden=True)
-        # Max rows in excel is 1048576. This might be safe if done via grouping.
-        ws.row_dimensions.group(last_used_row + 1, 1048576, hidden=True)
+                    # Try fuzzy parse
+                    try:
+                        # Skip short random numbers or text
+                        if len(val) < 6: continue 
+                        dt = dateutil.parser.parse(val, fuzzy=True)
+                        return dt
+                    except:
+                        continue
+                return None
 
-        return sheet_name
+            start_date = find_date_in_row(11)
+            end_date = find_date_in_row(12)
+            
+            date_str = "Unknown Date"
+            if start_date and end_date:
+                # Format: Jan 26 - Jan 30
+                s_str = start_date.strftime("%b %d")
+                e_str = end_date.strftime("%b %d")
+                date_str = f"{s_str} - {e_str}"
+            elif start_date:
+                 date_str = start_date.strftime("%b %d")
+            elif end_date:
+                 date_str = end_date.strftime("%b %d")
+            
+            extracted_date = date_str
+            
+            # 4. Clean Data
+            print(f"  Metadata Date: {extracted_date}")
+            
+            # A. Unmerge ALL cells
+            merged_ranges = list(ws.merged_cells.ranges)
+            for rng in merged_ranges:
+                ws.unmerge_cells(str(rng))
+                
+            # B. Delete Rows 1-14
+            ws.delete_rows(1, 14)
+            
+            # C. Conditional Delete Column D (4th Column)
+            # Check header at (1, 4)
+            header_d = str(ws.cell(1, 4).value).strip().upper()
+            if "BCRM" in header_d:
+                 print(f"  Keeping Column D (BCRM found).")
+                 # If we keep D, shifts DO NOT happen.
+                 offset = 0
+            else:
+                 # Delete D
+                 ws.delete_cols(4)
+                 offset = 1 # We deleted 1 column before target area
+            
+            # D. Delete "Column T" (Original 20)
+            # User wants to remove the "Border" column (Original 20).
+            # If we deleted D, this is now 19 (S). If we didn't, it is 20 (T).
+            # Target Delete Index = 20 - offset
+            ws.delete_cols(20 - offset)
+            
+            # E. Remove Footer ... (Same logic)
+            max_r = ws.max_row
+            found_footer_at = None
+            for r in range(max_r, max(1, max_r - 20), -1):
+                val = str(ws.cell(r, 1).value)
+                if val and "Number of Record" in val:
+                    found_footer_at = r
+                    break
+            
+            if found_footer_at:
+                count = max_r - found_footer_at + 1
+                if count > 0: ws.delete_rows(found_footer_at, count)
+            else:
+               if ws.max_row > 2: ws.delete_rows(ws.max_row - 1, 2)
+
+            # F. Resize & Add Image Formulas
+            # 1. FIND URL Column
+            url_col_idx = 18 - offset # Fallback: Original R (18) shifted by offset
+            
+            # Dynamic Scan
+            for col in range(1, ws.max_column + 1):
+                val = str(ws.cell(1, col).value).upper()
+                if "URL" in val and "ATTACH" in val:
+                    url_col_idx = col
+                    break
+            
+            img_col_idx = url_col_idx + 1
+            img_col_letter = get_column_letter(img_col_idx)
+
+            # 2. Add Header
+            ws.cell(1, img_col_idx).value = "IMAGES"
+
+            # 3. Resize Rows & Img Column
+            ws.column_dimensions[img_col_letter].width = 33
+            
+            for r in range(2, ws.max_row + 1):
+                ws.row_dimensions[r].height = 180
+                
+                # 4. Insert Formula: using _xlfn.IMAGE for compatibility
+                # Formula: =IMAGE(Reference,,1)
+                url_ref = f"{get_column_letter(url_col_idx)}{r}"
+                ws.cell(r, img_col_idx).value = f"=_xlfn.IMAGE({url_ref},,1)"
+
+            # 5. Save
+            clean_filename = f"LKS Data ({extracted_date}).xlsx"
+            clean_path = file_path.parent / clean_filename
+            wb.save(clean_path)
+            
+            print(f"  Processed Legacy File -> {clean_filename}")
+            return clean_path
+            
+        finally:
+            # Cleanup temp
+            if temp_xlsx.exists():
+                try: os.remove(temp_xlsx)
+                except: pass
