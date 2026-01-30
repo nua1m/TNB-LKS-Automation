@@ -9,32 +9,67 @@ class ImageInjector:
     def detect_type(url: str) -> str | None:
         if not url: return None
         u = url.lower()
-        if "old_read" in u: return "old"
-        if "card" in u: return "card"
-        if "new_meter" in u: return "new"
+        filename = u.split("/")[-1] # Focus on filename
+        
+        # OLD READ
+        if any(x in filename for x in ["old_read", "oldread", "old_red", "old_rea"]):
+            return "old"
+            
+        # CARD
+        # Typos: cad, crd, car, ard
+        if any(x in filename for x in ["card", "cad", "crd", "car", "ard"]):
+            return "card"
+        
+        # NEW METER
+        # Typos: newmeter, nee_meter, new_meer
+        if any(x in filename for x in ["new_meter", "newmeter", "nee_meter"]):
+            return "new"
+            
+        # Fallback fuzzy for new meter
+        if "new_m" in filename and ("eer" in filename or "ter" in filename or "etr" in filename): 
+            return "new"
+        
         return None
 
     @staticmethod
     def build_url_map(data_path, sheet_name=None):
         """Reads raw data and maps SO -> {old, card, new} URLs."""
-        # Need to fix circular import or just move import? Config is fine.
         from config import DATA_SHEET_NAME 
         target_sheet = sheet_name if sheet_name else (DATA_SHEET_NAME if DATA_SHEET_NAME else 0)
 
         df = pd.read_excel(data_path, sheet_name=target_sheet, dtype=str).fillna("")
         
-        # Normalize Columns (Handle Preprocessor Uppercase output)
-        df = df.rename(columns={
-            "3MS SO NO.": COL_3MS_SO, "3MS SO NO": COL_3MS_SO,
-            "ATTACHMENTS URL": COL_ATTACH_URL, "ATTACHMENTS URL": COL_ATTACH_URL,
-            "ATTACHMENT URL": COL_ATTACH_URL,
-        })
+        # Normalize Columns: Strip and Upper
+        df.columns = [str(c).strip().upper() for c in df.columns]
+        
+        # Mapping: keys must be UPPERCASE versions of expected headers
+        target_so = COL_3MS_SO.upper()
+        target_url = COL_ATTACH_URL.upper()
+        
+        rename_map = {}
+        for c in df.columns:
+            if c in ["3MS SO NO.", "3MS SO NO", "SO NUMBER", target_so]:
+                rename_map[c] = COL_3MS_SO
+            elif c in ["ATTACHMENTS URL", "ATTACHMENT URL", "ATTACHMENT_URL", target_url]:
+                rename_map[c] = COL_ATTACH_URL
+                
+        df = df.rename(columns=rename_map)
+        
+        # Debugging check
+        if COL_3MS_SO not in df.columns or COL_ATTACH_URL not in df.columns:
+            print(f"Warning: Columns not found. Available: {df.columns.tolist()}")
         
         # Forward fill SO numbers as per original logic
-        df[COL_3MS_SO] = df[COL_3MS_SO].replace("", pd.NA).ffill()
+        if COL_3MS_SO in df.columns:
+            df[COL_3MS_SO] = df[COL_3MS_SO].replace("", pd.NA).ffill()
+        else:
+            return {} 
         
         url_map = {}
+        # ... rest of loop logic is fine if columns exist
         for _, row in df.iterrows():
+            if COL_3MS_SO not in row or COL_ATTACH_URL not in row: continue
+            
             so = clean_so(row[COL_3MS_SO])
             url = str(row[COL_ATTACH_URL]).strip()
             if not so or not url: continue

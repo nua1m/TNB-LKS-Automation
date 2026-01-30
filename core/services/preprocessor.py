@@ -19,7 +19,27 @@ class Preprocessor:
         temp_xlsx = file_path + "_temp.xlsx"
         
         # 1. Convert to XLSX using Excel App (Handles XML/Format mismatch gracefully)
-        excel = win32.gencache.EnsureDispatch('Excel.Application')
+        try:
+            excel = win32.gencache.EnsureDispatch('Excel.Application')
+        except AttributeError:
+            # Handle win32com cache corruption
+            print(f"  Warning: COM Cache corrupted. Clearing gen_py...")
+            import shutil
+            import sys
+            import win32com
+            if hasattr(win32com, '__gen_path__') and os.path.exists(win32com.__gen_path__):
+                try:
+                    shutil.rmtree(win32com.__gen_path__)
+                    # Re-import to refresh
+                    import importlib
+                    importlib.reload(win32)
+                    excel = win32.gencache.EnsureDispatch('Excel.Application')
+                except Exception as e:
+                     print(f"  Failed to clear cache: {e}")
+                     raise e
+            else:
+                raise
+
         excel.Visible = False
         excel.DisplayAlerts = False
         
