@@ -157,14 +157,22 @@ class Preprocessor:
                 
         # Apply Logic:
         # User: "now in column r ... links. put image formula in column s"
-        # IMPORTANT: After dropping Column D, indices shift by 1!
-        # Original Col R (18) is now at index 17. Col S (19) is now at 18.
+        # DYNAMIC SEARCH for URL Column to be safe
+        link_col_idx = 18 # Default fallback (Col R if user says so)
         
-        link_col_idx = 17 # R (after D dropped)
-        img_col_idx = 18  # S (after D dropped)
+        # Scan headers in row 1
+        for col in range(1, ws.max_column + 1):
+            val = str(ws.cell(1, col).value).upper()
+            if "URL" in val and "ATTACH" in val:
+                link_col_idx = col
+                break
         
-        # 1. Rename Column S Header
+        img_col_idx = link_col_idx + 1
+        
+        # 1. Add "IMAGES" Header
         ws.cell(row=1, column=img_col_idx).value = "IMAGES"
+        ws.cell(row=1, column=img_col_idx).font = header_font
+        ws.cell(row=1, column=img_col_idx).alignment = align_style
         
         # 2. Add Images & Formatting
         ws.column_dimensions[get_column_letter(img_col_idx)].width = 33
