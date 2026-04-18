@@ -35,18 +35,19 @@ The immediate product direction is internal operational use first: make the tool
 
 Milestone A is the internal distribution milestone. The current repo now includes the first update foundation:
 - `Run LKS Automation.bat` uses a relative path instead of a machine-specific hardcoded path
+- `Run LKS Automation.bat` creates a local `.venv` on first run and reuses it afterward
 - `updater.py` checks GitHub Releases before launching the app
 - `VERSION` stores the local app version shown in the launcher
 - `launcher.py` displays the current app version and exposes a manual update check
 
 What is still needed to complete Milestone A:
-- publish versioned GitHub Releases with a ZIP artifact
-- package the app for cleaner Windows distribution
-- define safe upgrade rules for runtime folders and user-generated files
-- improve update status messaging and fallback behavior
+- validate the `.venv` bootstrap flow on the other laptop
+- make Python version setup more predictable across internal machines
+- later return to signed packaging for broader distribution
 
 The release/update contract now uses:
 - `VERSION` as the local version source
+- `Run LKS Automation.bat` to bootstrap the local `.venv` when missing
 - `scripts/build_release.py` to produce the release ZIP
 - `.github/workflows/release.yml` to publish tagged releases to GitHub
 - `docs/RELEASE_PROCESS.md` as the release operator guide
@@ -115,6 +116,14 @@ Or use:
 ```powershell
 Run LKS Automation.bat
 ```
+
+On first run, the batch launcher:
+
+- looks for Python 3.11 first, then 3.10, then `python`
+- creates `.venv` if it does not already exist
+- installs `requirements.txt`
+- reuses the same `.venv` on later runs
+- reinstalls dependencies only when `requirements.txt` changes
 
 Build the release ZIP:
 
