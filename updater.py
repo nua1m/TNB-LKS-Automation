@@ -78,10 +78,10 @@ def pick_release_zip_url(release: dict) -> str:
         if asset_name.endswith(".zip") and asset.get("browser_download_url"):
             return asset["browser_download_url"]
 
-    zipball_url = release.get("zipball_url")
-    if not zipball_url:
-        raise RuntimeError("Latest release does not contain a downloadable ZIP.")
-    return zipball_url
+    raise RuntimeError(
+        "Latest release does not contain the packaged ZIP asset yet. "
+        "Wait for the release workflow to finish and try again."
+    )
 
 
 def should_update(local_version: str, remote_version: str) -> bool:
