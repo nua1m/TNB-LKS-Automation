@@ -13,6 +13,7 @@ try:
     from PySide6.QtGui import QColor, QDesktopServices, QFont, QPalette
     from PySide6.QtWidgets import (
         QApplication,
+        QDialog,
         QFileDialog,
         QFrame,
         QGroupBox,
@@ -80,25 +81,122 @@ class ProcessorWorker(QObject):
         self._confirm_event.set()
 
 
-class StatChip(QFrame):
-    def __init__(self, title: str, value: str):
-        super().__init__()
-        self.setObjectName("statChip")
+class InfoDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("App Information")
+        self.setModal(True)
+        self.setMinimumWidth(320)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(4)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
 
-        title_label = QLabel(title)
-        title_label.setObjectName("statTitle")
-        layout.addWidget(title_label)
+        title = QLabel("App Information")
+        title.setObjectName("infoDialogTitle")
+        layout.addWidget(title)
 
-        self.value_label = QLabel(value)
-        self.value_label.setObjectName("statValue")
-        layout.addWidget(self.value_label)
+        self.version_value = QLabel("")
+        self.version_value.setObjectName("infoValue")
+        self.email_value = QLabel("syahmi@nuaim.my")
+        self.email_value.setObjectName("infoValue")
+        self.phone_value = QLabel("+60 18 2605 390")
+        self.phone_value.setObjectName("infoValue")
 
-    def set_value(self, value: str) -> None:
-        self.value_label.setText(value)
+        for label_text, value_widget in (
+            ("Version", self.version_value),
+            ("Support Email", self.email_value),
+            ("Support Phone", self.phone_value),
+        ):
+            row = QVBoxLayout()
+            row.setSpacing(2)
+            label = QLabel(label_text)
+            label.setObjectName("infoLabel")
+            row.addWidget(label)
+            row.addWidget(value_widget)
+            layout.addLayout(row)
+
+        self.check_updates_button = QPushButton("Check Updates")
+        layout.addWidget(self.check_updates_button)
+
+    def set_values(self, version: str) -> None:
+        self.version_value.setText(version)
+
+
+class FileDropArea(QFrame):
+    file_dropped = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("fileDropArea")
+        self.setAcceptDrops(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignCenter)
+
+        self.icon_label = QLabel("Upload")
+        self.icon_label.setObjectName("dropTitle")
+        self.icon_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.icon_label)
+
+        self.text_label = QLabel("Drag and drop your Excel file here")
+        self.text_label.setObjectName("dropText")
+        self.text_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.text_label)
+
+        self.hint_label = QLabel("Supports .xls and .xlsx")
+        self.hint_label.setObjectName("dropHint")
+        self.hint_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.hint_label)
+
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+
+    @staticmethod
+    def _extract_supported_file(event) -> str | None:
+        mime_data = event.mimeData()
+        if not mime_data.hasUrls():
+            return None
+
+        for url in mime_data.urls():
+            if not url.isLocalFile():
+                continue
+            local_path = url.toLocalFile()
+            if local_path.lower().endswith((".xls", ".xlsx")):
+                return local_path
+        return None
+
+    def dragEnterEvent(self, event) -> None:
+        file_path = self._extract_supported_file(event)
+        if file_path:
+            event.acceptProposedAction()
+            self.setProperty("dragActive", True)
+            self.style().unpolish(self)
+            self.style().polish(self)
+            self.update()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self.setProperty("dragActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        file_path = self._extract_supported_file(event)
+        self.setProperty("dragActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+        if file_path:
+            self.file_dropped.emit(file_path)
+            event.acceptProposedAction()
+            return
+        event.ignore()
 
 
 class LauncherWindow(QMainWindow):
@@ -113,12 +211,15 @@ class LauncherWindow(QMainWindow):
         self.worker: ProcessorWorker | None = None
 
         self.setWindowTitle(f"TNB LKS Automation v{VERSION}")
-        self.resize(1080, 760)
-        self.setMinimumSize(960, 680)
+        self.resize(1180, 780)
+        self.setMinimumSize(1020, 700)
 
         self._build_ui()
         self._apply_theme()
+        self.info_dialog = InfoDialog(self)
+        self.info_dialog.check_updates_button.clicked.connect(self.check_for_updates)
         self._set_status("Ready")
+        self._refresh_info_dialog()
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -129,90 +230,74 @@ class LauncherWindow(QMainWindow):
         root_layout.setSpacing(18)
 
         header_layout = QVBoxLayout()
-        header_layout.setSpacing(4)
+        header_layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
 
         title = QLabel("TNB LKS Automation")
         title.setObjectName("pageTitle")
-        header_layout.addWidget(title)
+        top_row.addWidget(title)
+        top_row.addStretch(1)
 
-        subtitle = QLabel(
-            "Professional desktop workflow for preparing LKS workbooks while keeping the Excel COM process local."
-        )
-        subtitle.setObjectName("pageSubtitle")
-        subtitle.setWordWrap(True)
-        header_layout.addWidget(subtitle)
+        self.info_button = QPushButton("i")
+        self.info_button.setObjectName("infoButton")
+        self.info_button.setToolTip("View app information")
+        self.info_button.clicked.connect(self.show_info_dialog)
+        top_row.addWidget(self.info_button)
+        header_layout.addLayout(top_row)
 
         root_layout.addLayout(header_layout)
 
-        status_row = QHBoxLayout()
-        status_row.setSpacing(12)
+        left_panel = QWidget()
+        left_column = QVBoxLayout(left_panel)
+        left_column.setContentsMargins(0, 0, 0, 0)
+        left_column.setSpacing(18)
+        left_column.addWidget(self._build_input_card(), 1)
+        left_column.addWidget(self._build_actions_card())
+        self.summary_card = self._build_summary_card()
+        left_column.addWidget(self.summary_card, 1)
 
-        self.status_chip = StatChip("Status", "Ready")
-        self.version_chip = StatChip("Version", VERSION)
-        self.update_chip = StatChip("Updates", "Check manually")
+        right_panel = QWidget()
+        right_column = QVBoxLayout(right_panel)
+        right_column.setContentsMargins(0, 0, 0, 0)
+        right_column.setSpacing(18)
 
-        status_row.addWidget(self.status_chip)
-        status_row.addWidget(self.version_chip)
-        status_row.addWidget(self.update_chip)
-        root_layout.addLayout(status_row)
+        self.log_card = self._build_log_card()
+
+        right_column.addWidget(self.log_card, 1)
 
         content_row = QHBoxLayout()
         content_row.setSpacing(18)
-
-        left_column = QVBoxLayout()
-        left_column.setSpacing(18)
-        content_row.addLayout(left_column, 3)
-
-        left_column.addWidget(self._build_input_card())
-        left_column.addWidget(self._build_actions_card())
-
-        self.summary_card = self._build_summary_card()
-        left_column.addWidget(self.summary_card)
-        left_column.addStretch(1)
-
-        self.log_card = self._build_log_card()
-        content_row.addWidget(self.log_card, 4)
-
+        content_row.addWidget(left_panel, 3)
+        content_row.addWidget(right_panel, 4)
         root_layout.addLayout(content_row, 1)
 
     def _build_input_card(self) -> QGroupBox:
         card = QGroupBox("Input Excel File")
         layout = QVBoxLayout(card)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
 
-        description = QLabel(
-            "Choose the technician Excel file (.xls or .xlsx). The app will create the LKS result workbook in the same folder."
-        )
-        description.setObjectName("mutedText")
-        description.setWordWrap(True)
-        layout.addWidget(description)
-
-        file_row = QHBoxLayout()
-        file_row.setSpacing(10)
+        self.drop_area = FileDropArea()
+        self.drop_area.setMinimumHeight(140)
+        self.drop_area.setMaximumHeight(240)
+        self.drop_area.file_dropped.connect(self._set_selected_file)
+        layout.addWidget(self.drop_area, 1)
 
         self.file_edit = QLineEdit()
         self.file_edit.setPlaceholderText("Select an input workbook")
         self.file_edit.setClearButtonEnabled(True)
-        file_row.addWidget(self.file_edit, 1)
+        layout.addWidget(self.file_edit)
 
         self.browse_button = QPushButton("Browse")
         self.browse_button.clicked.connect(self.select_file)
-        file_row.addWidget(self.browse_button)
-
-        layout.addLayout(file_row)
+        layout.addWidget(self.browse_button)
         return card
 
     def _build_actions_card(self) -> QGroupBox:
         card = QGroupBox("Actions")
         layout = QVBoxLayout(card)
         layout.setSpacing(12)
-
-        help_text = QLabel(
-            "Run the LKS process, check for GitHub release updates, or open the generated files after the run finishes."
-        )
-        help_text.setObjectName("mutedText")
-        help_text.setWordWrap(True)
-        layout.addWidget(help_text)
 
         primary_row = QHBoxLayout()
         primary_row.setSpacing(10)
@@ -221,10 +306,6 @@ class LauncherWindow(QMainWindow):
         self.process_button.setObjectName("primaryButton")
         self.process_button.clicked.connect(self.start_processing)
         primary_row.addWidget(self.process_button, 1)
-
-        self.update_button = QPushButton("Check Updates")
-        self.update_button.clicked.connect(self.check_for_updates)
-        primary_row.addWidget(self.update_button)
 
         layout.addLayout(primary_row)
 
@@ -235,12 +316,12 @@ class LauncherWindow(QMainWindow):
         self.open_folder_button.clicked.connect(self.open_result_folder)
         secondary_row.addWidget(self.open_folder_button)
 
-        self.open_result_file_button = QPushButton("Open Result File")
+        self.open_result_file_button = QPushButton("Open LKS")
         self.open_result_file_button.clicked.connect(self.open_result_file)
         self.open_result_file_button.setEnabled(False)
         secondary_row.addWidget(self.open_result_file_button)
 
-        self.open_generated_input_button = QPushButton("Open Cleaned Input")
+        self.open_generated_input_button = QPushButton("Open Raw Data")
         self.open_generated_input_button.clicked.connect(self.open_generated_input_file)
         self.open_generated_input_button.setEnabled(False)
         secondary_row.addWidget(self.open_generated_input_button)
@@ -253,34 +334,27 @@ class LauncherWindow(QMainWindow):
         layout = QVBoxLayout(card)
         layout.setSpacing(8)
 
-        self.summary_label = QLabel(
+        self.summary_text = QPlainTextEdit()
+        self.summary_text.setObjectName("summaryPane")
+        self.summary_text.setReadOnly(True)
+        self.summary_text.setPlainText(
             "No run completed yet. After processing, this panel will show the latest totals."
         )
-        self.summary_label.setObjectName("summaryText")
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.summary_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(self.summary_label)
+        self.summary_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.summary_text, 1)
 
         return card
 
     def _build_log_card(self) -> QGroupBox:
-        card = QGroupBox("Run Log")
+        card = QGroupBox("Activity")
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout = QVBoxLayout(card)
         layout.setSpacing(10)
 
-        description = QLabel(
-            "Live processing messages, warnings, and review notes appear here."
-        )
-        description.setObjectName("mutedText")
-        description.setWordWrap(True)
-        layout.addWidget(description)
-
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setObjectName("logPane")
-        self.log_text.setFont(QFont("Consolas", 10))
+        self.log_text.setFont(QFont("Inter", 10))
         layout.addWidget(self.log_text, 1)
 
         return card
@@ -289,106 +363,167 @@ class LauncherWindow(QMainWindow):
         self.setStyleSheet(
             """
             QWidget {
-                background: #f3f6fb;
-                color: #132238;
-                font-family: "Segoe UI";
+                background: #f6f7f9;
+                color: #182230;
+                font-family: "Inter", "Segoe UI";
                 font-size: 10pt;
             }
             QMainWindow {
-                background: #f3f6fb;
+                background: #f6f7f9;
             }
             QLabel#pageTitle {
                 font-size: 22pt;
                 font-weight: 700;
-                color: #0f172a;
+                color: #111827;
             }
-            QLabel#pageSubtitle {
-                color: #536377;
-                font-size: 10.5pt;
+            QFrame#fileDropArea {
+                background: #fbfcfd;
+                border: 2px dashed #d7e0ea;
+                border-radius: 12px;
+            }
+            QFrame#fileDropArea[dragActive="true"] {
+                background: #f2f7ff;
+                border: 2px dashed #7aa2e3;
+            }
+            QLabel#dropTitle {
+                color: #111827;
+                font-size: 12pt;
+                font-weight: 700;
+            }
+            QLabel#dropText {
+                color: #334155;
+                font-size: 10pt;
+                font-weight: 600;
+            }
+            QLabel#dropHint {
+                color: #6b7280;
+                font-size: 9pt;
             }
             QGroupBox {
                 background: white;
-                border: 1px solid #d7e0ea;
-                border-radius: 14px;
+                border: 1px solid #e4e9ef;
+                border-radius: 10px;
                 font-weight: 600;
-                margin-top: 12px;
-                padding-top: 10px;
+                margin-top: 10px;
+                padding-top: 14px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 left: 16px;
                 padding: 0 4px;
-                color: #10233c;
-            }
-            QFrame#statChip {
-                background: white;
-                border: 1px solid #d7e0ea;
-                border-radius: 14px;
-            }
-            QLabel#statTitle {
-                color: #607086;
-                font-size: 9pt;
-            }
-            QLabel#statValue {
-                color: #0f172a;
-                font-size: 16pt;
-                font-weight: 700;
+                color: #1f2937;
             }
             QLabel#mutedText {
-                color: #607086;
+                color: #667085;
             }
-            QLabel#summaryText {
-                color: #223247;
-                background: #f8fbff;
-                border: 1px solid #dbe6f1;
+            QPushButton#infoButton {
+                min-width: 32px;
+                max-width: 32px;
+                min-height: 32px;
+                max-height: 32px;
+                background: #ffffff;
+                border: 1px solid #dfe5ec;
                 border-radius: 10px;
-                padding: 12px;
+                color: #4b5563;
+                font-size: 12pt;
+                font-weight: 700;
+                padding: 0px;
+            }
+            QPushButton#infoButton:hover {
+                background: #f6f8fb;
             }
             QLineEdit, QPlainTextEdit {
-                background: #fbfdff;
-                border: 1px solid #cfdae6;
-                border-radius: 10px;
-                padding: 10px 12px;
+                background: #fcfdff;
+                border: 1px solid #dde4ec;
+                border-radius: 8px;
+                padding: 11px 13px;
             }
             QLineEdit:focus, QPlainTextEdit:focus {
-                border: 1px solid #2c6bed;
+                border: 1px solid #8aa6d6;
             }
             QPushButton {
-                background: #eef3f9;
-                border: 1px solid #cfdae6;
-                border-radius: 10px;
-                padding: 10px 14px;
+                background: #ffffff;
+                border: 1px solid #dde4ec;
+                border-radius: 8px;
+                padding: 10px 15px;
                 font-weight: 600;
+                color: #243041;
             }
             QPushButton:hover {
-                background: #e5edf7;
+                background: #f6f8fb;
             }
             QPushButton:disabled {
-                background: #f5f7fa;
-                color: #9aa7b6;
-                border-color: #e0e6ed;
+                background: #f8fafc;
+                color: #9aa5b1;
+                border-color: #e5eaf0;
             }
             QPushButton#primaryButton {
-                background: #18794e;
-                border: 1px solid #18794e;
+                background: #1f7a4f;
+                border: 1px solid #1f7a4f;
                 color: white;
             }
             QPushButton#primaryButton:hover {
-                background: #146a44;
+                background: #1a6844;
+            }
+            QPlainTextEdit#summaryPane {
+                background: #fcfdff;
+                color: #243041;
+                border: 1px solid #e1e7ee;
+                font-size: 10pt;
             }
             QPlainTextEdit#logPane {
-                background: #0f172a;
-                color: #d8e6ff;
-                border: 1px solid #0f172a;
+                background: #fcfdff;
+                color: #344054;
+                border: 1px solid #e1e7ee;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 12px;
+                margin: 8px 3px 8px 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c4cfdb;
+                min-height: 36px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #aab9ca;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
+            QLabel#infoDialogTitle {
+                color: #1f2937;
+                font-size: 12pt;
+                font-weight: 700;
+            }
+            QLabel#infoLabel {
+                color: #667085;
+                font-size: 9pt;
+                font-weight: 600;
+            }
+            QLabel#infoValue {
+                color: #1f2937;
+                font-size: 10pt;
             }
             """
         )
 
     def _set_status(self, text: str) -> None:
-        self.status_chip.set_value(text)
+        return None
 
     def _set_update_text(self, text: str) -> None:
-        self.update_chip.set_value(text)
+        return None
+
+    def _refresh_info_dialog(self) -> None:
+        self.info_dialog.set_values(version=VERSION)
+
+    def show_info_dialog(self) -> None:
+        self._refresh_info_dialog()
+        self.info_dialog.exec()
 
     def append_log(self, message: str) -> None:
         clean_message = ANSI_PATTERN.sub("", message).rstrip()
@@ -418,13 +553,18 @@ class LauncherWindow(QMainWindow):
             "Excel files (*.xls *.xlsx);;All files (*.*)",
         )
         if file_path:
-            self.file_edit.setText(file_path)
+            self._set_selected_file(file_path)
+
+    def _set_selected_file(self, file_path: str) -> None:
+        self.file_edit.setText(file_path)
+        file_name = Path(file_path).name
+        self.drop_area.text_label.setText(file_name)
+        self.drop_area.hint_label.setText(str(Path(file_path)))
 
     def set_processing_state(self, active: bool) -> None:
         self.processing = active
         self.process_button.setEnabled(not active)
         self.browse_button.setEnabled(not active)
-        self.update_button.setEnabled(not active)
         self.file_edit.setEnabled(not active)
 
         if active:
@@ -457,15 +597,15 @@ class LauncherWindow(QMainWindow):
     def open_result_file(self) -> None:
         self._open_path(
             self.last_output_path or "",
-            "Open Result File Failed",
-            "The saved workbook could not be found.",
+            "Open LKS Failed",
+            "The saved LKS workbook could not be found.",
         )
 
     def open_generated_input_file(self) -> None:
         self._open_path(
             self.generated_input_path or "",
-            "Open Input File Failed",
-            "The generated input file could not be found.",
+            "Open Raw Data Failed",
+            "The processed raw data file could not be found.",
         )
 
     def start_processing(self) -> None:
@@ -486,7 +626,7 @@ class LauncherWindow(QMainWindow):
         self.last_output_path = None
         self.generated_input_path = None
         self.result_folder = str(Path(data_path).resolve().parent)
-        self.summary_label.setText("Run in progress. Summary will appear here after processing completes.")
+        self.summary_text.setPlainText("Run in progress. Summary will appear here after processing completes.")
         self.log_text.clear()
         self.append_log("Starting LKS processing...")
         self._set_status("Processing workbook...")
@@ -539,7 +679,7 @@ class LauncherWindow(QMainWindow):
         if result.get("aborted"):
             self._set_status("Processing cancelled")
             self.append_log("Run cancelled before saving changes.")
-            self.summary_label.setText("Run cancelled before saving changes.")
+            self.summary_text.setPlainText("Run cancelled before saving changes.")
             return
 
         self._set_status("Completed")
@@ -551,7 +691,7 @@ class LauncherWindow(QMainWindow):
         if self.last_output_path:
             self.append_log(f"Saved to: {self.last_output_path}")
         if self.generated_input_path and self.generated_input_path != self.file_edit.text().strip():
-            self.append_log(f"Cleaned input: {self.generated_input_path}")
+            self.append_log(f"Raw data file: {self.generated_input_path}")
 
         self._render_summary(result)
 
@@ -561,7 +701,7 @@ class LauncherWindow(QMainWindow):
             (
                 "LKS processing completed successfully.\n\n"
                 f"Saved to:\n{self.last_output_path}\n\n"
-                "You can now open the result file, open the cleaned input file, or review the run log."
+                "You can now open the LKS file, open the raw data file, or review the run log."
             ),
         )
 
@@ -573,7 +713,7 @@ class LauncherWindow(QMainWindow):
         self._set_status("Failed")
         friendly = self.format_error_message(error_message)
         self.append_log(f"Error: {friendly}")
-        self.summary_label.setText("Run failed. Review the log and fix the issue before running again.")
+        self.summary_text.setPlainText("Run failed. Review the log and fix the issue before running again.")
 
         QMessageBox.critical(
             self,
@@ -614,7 +754,7 @@ class LauncherWindow(QMainWindow):
         if not lines:
             lines.append("Run completed, but no summary details were returned.")
 
-        self.summary_label.setText("\n".join(lines))
+        self.summary_text.setPlainText("\n".join(lines))
 
 
 def main() -> None:
