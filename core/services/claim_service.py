@@ -103,7 +103,7 @@ class ClaimService:
                         if tras_date:
                             break
                     if tras_date:
-                        stats["tras_by_date"][tras_date.strftime("%d %b %Y")] += 1
+                        stats["tras_by_date"][tras_date] += 1
                     else:
                         stats["tras_by_date"]["Unknown date"] += 1
                     continue
@@ -172,7 +172,20 @@ class ClaimService:
                 "Remarks 2": logic["remarks_2"],
             })
         
-        stats["tras_by_date"] = dict(stats["tras_by_date"])
+        formatted_tras_by_date: dict[str, int] = {}
+        for tras_key, tras_count in sorted(
+            stats["tras_by_date"].items(),
+            key=lambda item: (
+                item[0] == "Unknown date",
+                item[0] if item[0] != "Unknown date" else datetime.max.date(),
+            ),
+        ):
+            if tras_key == "Unknown date":
+                formatted_tras_by_date["Unknown date"] = tras_count
+            else:
+                formatted_tras_by_date[tras_key.strftime("%d %b %Y")] = tras_count
+
+        stats["tras_by_date"] = formatted_tras_by_date
         stats["duplicate_sos"] = sorted(stats["duplicate_sos"])
         return rows, stats
 

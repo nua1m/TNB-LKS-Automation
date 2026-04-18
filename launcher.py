@@ -770,7 +770,7 @@ def main() -> None:
     app.setPalette(palette)
 
     window = LauncherWindow()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
 
 
