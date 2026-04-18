@@ -61,8 +61,9 @@ The app currently maps the following Business Areas from `Site ID`:
 | Site ID | Business Area |
 | --- | --- |
 | `6340` | Johor Bahru |
+| `6342` | Kulai Jaya |
 | `6346` | Johor Jaya |
-| `6410` | KOTA BHARU |
+| `6410` | Kota Bharu |
 
 ## Current Business Analysis
 
