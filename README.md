@@ -52,7 +52,19 @@ The release/update contract now uses:
 - `.github/workflows/release.yml` to publish tagged releases to GitHub
 - `docs/RELEASE_PROCESS.md` as the release operator guide
 
-## Current BA
+## Current Business Areas
+
+In this project, `BA` means `Business Area`.
+
+The app currently maps the following Business Areas from `Site ID`:
+
+| Site ID | Business Area |
+| --- | --- |
+| `6340` | Johor Bahru |
+| `6346` | Johor Jaya |
+| `6410` | KOTA BHARU |
+
+## Current Business Analysis
 
 This section captures the current business analysis assumptions and scope.
 
