@@ -5,7 +5,7 @@
 This project automates the preparation of *Laporan Kerja Selesai* (LKS) workbooks for TNB smart meter installation reporting.
 
 The current app is a Windows desktop workflow built around:
-- a small Tkinter launcher for file selection
+- a PySide6/Qt desktop launcher for file selection and run monitoring
 - a Python processing pipeline for Excel transformation
 - output generation into a formatted `.xlsm` workbook
 
@@ -38,7 +38,7 @@ Milestone A is the internal distribution milestone. The current repo now include
 - `Run LKS Automation.bat` creates a local `.venv` on first run and reuses it afterward
 - `updater.py` checks GitHub Releases before launching the app
 - `VERSION` stores the local app version shown in the launcher
-- `launcher.py` displays the current app version and exposes a manual update check
+- `launcher.py` displays the current app version, live run status, and a manual update check
 
 What is still needed to complete Milestone A:
 - validate the `.venv` bootstrap flow on the other laptop
@@ -92,7 +92,7 @@ If the tool is later sold to other vendors, the app should move toward:
 ## Tech Stack
 
 - Python 3.10+
-- Tkinter for the current desktop launcher
+- PySide6/Qt for the current desktop launcher
 - Pandas for data processing
 - OpenPyXL and Xlwings for Excel handling
 - Requests and BeautifulSoup4 for supporting data and image workflows

@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
+from collections import Counter
 
 from core.so_utils import clean_so
 from core.services.date_engine import DateEngine
@@ -73,25 +74,38 @@ class ClaimService:
 
         stats = {
             "total_sos_raw": 0, "tras_removed": 0, "duplicates_skipped": 0,
-            "sos_after_tras": 0, "invalid_dates": 0, "missing_address": 0
+            "sos_after_tras": 0, "invalid_dates": 0, "missing_address": 0,
+            "tras_by_date": Counter(), "duplicate_sos": [], "duplicate_groups": 0,
+            "duplicate_counts": {}
         }
 
         so_groups = []
-        seen = set()
 
         for so, subdf in df.groupby(COL_3MS_SO, sort=False):
             so_clean = clean_so(so)
-            if not so_clean: continue
+            if not so_clean:
+                continue
             stats["total_sos_raw"] += 1
 
-            if so_clean in seen:
-                stats["duplicates_skipped"] += 1
-                continue
-            seen.add(so_clean)
+            duplicate_count = max(len(subdf.index) - 1, 0)
+            if duplicate_count:
+                stats["duplicates_skipped"] += duplicate_count
+                stats["duplicate_groups"] += 1
+                stats["duplicate_sos"].append(so_clean)
+                stats["duplicate_counts"][so_clean] = duplicate_count + 1
 
             if COL_USER_STATUS in subdf.columns:
                 if subdf[COL_USER_STATUS].astype(str).str.upper().str.contains("TRAS").any():
                     stats["tras_removed"] += 1
+                    tras_date = None
+                    for _, tras_row in subdf.iterrows():
+                        tras_date = DateEngine.parse_date(tras_row.get(COL_STATUS_DATE, "") or "")
+                        if tras_date:
+                            break
+                    if tras_date:
+                        stats["tras_by_date"][tras_date.strftime("%d %b %Y")] += 1
+                    else:
+                        stats["tras_by_date"]["Unknown date"] += 1
                     continue
             
             # Use first row of the group
@@ -158,6 +172,8 @@ class ClaimService:
                 "Remarks 2": logic["remarks_2"],
             })
         
+        stats["tras_by_date"] = dict(stats["tras_by_date"])
+        stats["duplicate_sos"] = sorted(stats["duplicate_sos"])
         return rows, stats
 
     @staticmethod

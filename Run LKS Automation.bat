@@ -4,14 +4,17 @@ cd /d "%~dp0"
 
 set "VENV_DIR=.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+set "VENV_PYW=%VENV_DIR%\Scripts\pythonw.exe"
 set "REQ_MARKER=%VENV_DIR%\requirements.sha256"
 set "BOOTSTRAP_MODE="
+set "EXIT_CODE=0"
 
 if not exist "%VENV_PY%" (
     call :find_python
     if not defined BOOTSTRAP_MODE (
         echo Python 3.11 or 3.10 was not found.
         echo Install Python, then run this launcher again.
+        set "EXIT_CODE=1"
         goto :end
     )
 
@@ -19,23 +22,35 @@ if not exist "%VENV_PY%" (
     call :create_venv
     if errorlevel 1 (
         echo Failed to create the virtual environment.
+        set "EXIT_CODE=1"
         goto :end
     )
 
     if not exist "%VENV_PY%" (
         echo Virtual environment was not created successfully.
+        set "EXIT_CODE=1"
         goto :end
     )
 )
 
 call :sync_requirements
-if errorlevel 1 goto :end
+if errorlevel 1 (
+    set "EXIT_CODE=1"
+    goto :end
+)
 
-"%VENV_PY%" updater.py --launch launcher.py
+if exist "%VENV_PYW%" (
+    start "" "%VENV_PYW%" updater.py --launch launcher.py
+) else (
+    start "" "%VENV_PY%" updater.py --launch launcher.py
+)
+goto :done
 
 :end
 pause
-exit /b 0
+
+:done
+exit /b %EXIT_CODE%
 
 :find_python
 where python >nul 2>nul

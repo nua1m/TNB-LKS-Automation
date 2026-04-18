@@ -33,13 +33,21 @@ def run_process(
     show_cli_summary: bool = True,
 ):
     log_fn = log_fn or print
+    step_index = 1
+    generated_input_path = str(data_path)
+
+    def step(title: str, status_message: str | None = None) -> None:
+        nonlocal step_index
+        if status_fn and status_message:
+            status_fn(status_message)
+        _emit(log_fn, f"{CYAN}Step {step_index}: {title}{RESET}")
+        step_index += 1
 
     if data_path.suffix.lower() == ".xls":
-        if status_fn:
-            status_fn("Converting legacy .xls file")
-        _emit(log_fn, f"{CYAN}> Detected legacy raw file (.xls). Converting and cleaning...{RESET}")
+        step("Converting legacy .xls file", "Converting legacy .xls file")
         try:
             new_path = Preprocessor.process_legacy_file(data_path)
+            generated_input_path = str(new_path)
             _emit(log_fn, f"{GREEN}> Legacy file processed successfully.{RESET}")
             _emit(log_fn, f"{DIM}  New input file: {new_path.name}{RESET}")
             _emit(log_fn, f"{CYAN}> Continuing with the cleaned file...{RESET}")
@@ -56,7 +64,7 @@ def run_process(
             raise
 
     if status_fn:
-        status_fn("Preparing run")
+        status_fn("Ready to process")
 
     _emit(log_fn, f"{CYAN}Input file  : {RESET}{data_path}")
     _emit(log_fn, f"{CYAN}Template    : {RESET}{template_path}")
@@ -73,18 +81,26 @@ def run_process(
     source_path = data_path
     source_sheet = None
 
-    if status_fn:
-        status_fn("Reading input data")
-    _emit(log_fn, f"{CYAN}> Reading input data...{RESET}")
+    step("Reading input data", "Reading input data")
     claim_rows, stats = ClaimService.build_rows(source_path, sheet_name=source_sheet)
 
     _emit(log_fn, f"{DIM}  - SOs after TRAS removal : {RESET}{GREEN}{stats['sos_after_tras']}{RESET}")
     _emit(log_fn, f"{DIM}  - Duplicate SOs skipped : {RESET}{GREEN}{stats['duplicates_skipped']}{RESET}")
     _emit(log_fn, f"{DIM}  - Rows skipped for TRAS : {RESET}{GREEN}{stats['tras_removed']}{RESET}")
+    if stats.get("duplicate_groups"):
+        _emit(log_fn, f"{DIM}  - SOs with duplicates    : {RESET}{GREEN}{stats['duplicate_groups']}{RESET}")
+        _emit(log_fn, f"{DIM}  - Duplicate SO list:{RESET}")
+        duplicate_items = list(stats.get("duplicate_counts", {}).items())
+        for so_value, row_count in duplicate_items[:10]:
+            _emit(log_fn, f"{DIM}      {so_value}: {RESET}{GREEN}{row_count} rows{RESET}")
+        if len(duplicate_items) > 10:
+            _emit(log_fn, f"{DIM}      ... and {len(duplicate_items) - 10} more SOs{RESET}")
+    if stats.get("tras_by_date"):
+        _emit(log_fn, f"{DIM}  - TRAS by date:{RESET}")
+        for tras_date, tras_count in stats["tras_by_date"].items():
+            _emit(log_fn, f"{DIM}      {tras_date}: {RESET}{GREEN}{tras_count}{RESET}")
 
-    if status_fn:
-        status_fn("Checking existing template data")
-    _emit(log_fn, f"{CYAN}> Checking existing template data...{RESET}")
+    step("Checking existing template data", "Checking existing template data")
 
     ws_claim = handler.ws_claim
     existing_sos = set()
@@ -125,11 +141,10 @@ def run_process(
             "missing_count": 0,
             "counts": {"old": 0, "card": 0, "new": 0},
             "elapsed": time.time() - start_time,
+            "generated_input_path": generated_input_path,
         }
 
-    if status_fn:
-        status_fn("Writing rows into template")
-    _emit(log_fn, f"{CYAN}> Writing claim and attachment rows...{RESET}")
+    step("Writing rows into the template", "Writing rows into template")
 
     def get_next_empty(worksheet, col=2):
         for row_index in range(3, worksheet.max_row + 2):
@@ -141,9 +156,8 @@ def run_process(
     start_attach = get_next_empty(handler.ws_attach)
     ClaimService.write_data(handler, new_rows, start_claim, start_attach)
 
-    if status_fn:
-        status_fn("Checking image links")
-    _emit(log_fn, "> Checking image links for OLD meter, CARD, and NEW meter...")
+    step("Checking image links", "Checking image links")
+    _emit(log_fn, f"{DIM}  Reviewing OLD meter, CARD, and NEW meter image links.{RESET}")
 
     total_imgs = len(new_rows)
     img_counter = 0
@@ -160,9 +174,7 @@ def run_process(
     if show_cli_summary:
         _emit(log_fn, "")
 
-    if status_fn:
-        status_fn("Reviewing rows that need attention")
-    _emit(log_fn, f"{RED}> Reviewing rows that need attention...{RESET}")
+    step("Reviewing rows that need attention", "Reviewing rows that need attention")
 
     missing, counts = QualityControl.analyze_missing(handler)
     if missing:
@@ -179,18 +191,14 @@ def run_process(
     QualityControl.mark_defective(handler, missing)
     QualityControl.format_all(handler)
 
-    if status_fn:
-        status_fn("Saving result workbook")
-    _emit(log_fn, "> Saving result workbook...")
+    step("Saving the result workbook", "Saving result workbook")
     handler.save()
     handler.close()
 
     try:
         import win32com.client as win32
 
-        if status_fn:
-            status_fn("Finalizing workbook")
-        _emit(log_fn, f"{DIM}> Finalizing workbook in Excel...{RESET}")
+        step("Finalizing the workbook", "Finalizing workbook")
 
         try:
             excel = win32.gencache.EnsureDispatch("Excel.Application")
@@ -206,11 +214,11 @@ def run_process(
         workbook.Save()
         workbook.Close()
         excel.Quit()
-        _emit(log_fn, f"{GREEN}  Workbook refresh completed.{RESET}")
+        _emit(log_fn, f"{GREEN}Workbook refresh completed.{RESET}")
     except Exception as exc:
         _emit(
             log_fn,
-            f"{YELLOW}  Note: File saved successfully, but Excel could not auto-refresh ({exc}). If Excel asks, click 'Enable Content'.{RESET}",
+            f"{YELLOW}File saved successfully, but Excel could not auto-refresh ({exc}). If Excel asks, click 'Enable Content'.{RESET}",
         )
         try:
             excel.Quit()
@@ -221,6 +229,9 @@ def run_process(
     summary = {
         "Processed SOs": stats["sos_after_tras"],
         "Added to template": len(new_rows),
+        "Duplicate SOs skipped": stats["duplicates_skipped"],
+        "Rows skipped for TRAS": stats["tras_removed"],
+        "SOs with duplicates": stats.get("duplicate_groups", 0),
         "Rows needing review": len(missing),
         "Missing OLD meter": counts["old"],
         "Missing CARD": counts["card"],
@@ -228,18 +239,27 @@ def run_process(
         "Execution time": f"{elapsed:.2f}s",
     }
 
+    _emit(log_fn, "")
+    _emit(log_fn, f"{GREEN}Run complete.{RESET}")
+    _emit(log_fn, f"{DIM}Next step: open the saved workbook and review any rows needing attention.{RESET}")
+
     if show_cli_summary:
         summary_block(summary, str(output_path))
 
     return {
         "aborted": False,
         "output_path": str(output_path),
+        "generated_input_path": generated_input_path,
         "new_rows": len(new_rows),
         "existing_rows": len(existing_sos),
         "missing_count": len(missing),
         "counts": counts,
         "elapsed": elapsed,
         "summary": summary,
+        "tras_by_date": stats.get("tras_by_date", {}),
+        "duplicates_skipped": stats["duplicates_skipped"],
+        "duplicate_groups": stats.get("duplicate_groups", 0),
+        "duplicate_counts": stats.get("duplicate_counts", {}),
     }
 
 
