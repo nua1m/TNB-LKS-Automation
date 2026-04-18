@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 set "VENV_DIR=.venv"
@@ -16,7 +16,7 @@ if not exist "%VENV_PY%" (
     )
 
     echo Creating virtual environment...
-    %BOOTSTRAP_PY% -m venv "%VENV_DIR%"
+    !BOOTSTRAP_PY! -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo Failed to create the virtual environment.
         goto :end
