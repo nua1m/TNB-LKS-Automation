@@ -7,7 +7,6 @@ The updater expects a GitHub Release with:
 - a semantic version tag such as `v0.1.0`
 - a ZIP asset produced by `scripts/build_release.py`
 - repository files laid out at the ZIP root, not nested under an extra top-level folder
-- packaged Windows binaries built by `scripts/build_windows_bundle.py`
 
 The current artifact name format is:
 
@@ -26,13 +25,16 @@ TNB-LKS-Automation-v0.1.0.zip
 The build script includes:
 
 - `Run LKS Automation.bat`
-- `launcher.exe`
-- `updater.exe`
-- `processor.exe`
-- `_internal/`
+- `launcher.py`
+- `updater.py`
+- `main.py`
+- `config.py`
 - `VERSION`
 - `README.md`
+- `requirements.txt`
 - `LKS Template (M).xlsm`
+- `core/`
+- `ui/`
 
 The build script excludes runtime and local-machine state such as:
 
@@ -53,17 +55,10 @@ Build the release ZIP locally:
 .venv\Scripts\python.exe scripts\build_release.py
 ```
 
-Build only the packaged Windows bundle:
-
-```powershell
-.venv\Scripts\python.exe scripts\build_windows_bundle.py
-```
-
 Output:
 
 - `dist/TNB-LKS-Automation-v<version>.zip`
 - `dist/release_manifest.json`
-- `build/release-root/`
 
 ## Publish Flow
 
@@ -86,4 +81,3 @@ git push origin v0.1.0
 - `updater.py` checks the latest GitHub Release, not Git commits directly.
 - If multiple release assets exist, the updater prefers a `.zip` asset.
 - Keep the tag format aligned with `VERSION` so update prompts remain consistent.
-- GitHub Actions installs both `requirements.txt` and `requirements-build.txt` before building the release artifact.

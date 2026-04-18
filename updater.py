@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 from tkinter import Tk, messagebox
@@ -12,6 +12,8 @@ from tkinter import Tk, messagebox
 import requests
 
 
+APP_DIR = Path(__file__).resolve().parent
+VERSION_FILE = APP_DIR / "VERSION"
 REPOSITORY = "nua1m/TNB-LKS-Automation"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 REQUEST_TIMEOUT_SECONDS = 8
@@ -23,16 +25,6 @@ PRESERVE_TOP_LEVEL = {
     "results",
     "uploads",
 }
-
-
-def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
-
-
-APP_DIR = get_app_dir()
-VERSION_FILE = APP_DIR / "VERSION"
 
 
 def parse_version(raw: str) -> tuple[int, ...]:
@@ -78,10 +70,10 @@ def pick_release_zip_url(release: dict) -> str:
         if asset_name.endswith(".zip") and asset.get("browser_download_url"):
             return asset["browser_download_url"]
 
-    raise RuntimeError(
-        "Latest release does not contain the packaged ZIP asset yet. "
-        "Wait for the release workflow to finish and try again."
-    )
+    zipball_url = release.get("zipball_url")
+    if not zipball_url:
+        raise RuntimeError("Latest release does not contain a downloadable ZIP.")
+    return zipball_url
 
 
 def should_update(local_version: str, remote_version: str) -> bool:
@@ -126,43 +118,6 @@ def apply_release(payload_dir: Path) -> None:
         shutil.copy2(source_path, destination)
 
 
-def schedule_windows_update(payload_dir: Path, launch_target_name: str) -> None:
-    temp_root = payload_dir.parent
-    script_path = temp_root / "apply_update.cmd"
-    launch_target_path = APP_DIR / launch_target_name
-
-    script_lines = [
-        "@echo off",
-        "setlocal",
-        "ping 127.0.0.1 -n 3 >nul",
-        f'xcopy "{payload_dir}\\*" "{APP_DIR}\\" /E /I /Y >nul',
-    ]
-
-    if launch_target_name:
-        script_lines.append(f'start "" "{launch_target_path}"')
-
-    script_lines.extend(
-        [
-            f'rd /s /q "{temp_root}" >nul 2>nul',
-            "exit /b 0",
-        ]
-    )
-
-    script_path.write_text("\r\n".join(script_lines) + "\r\n", encoding="utf-8")
-    creation_flags = 0
-    if hasattr(subprocess, "DETACHED_PROCESS"):
-        creation_flags |= subprocess.DETACHED_PROCESS
-    if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-        creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
-
-    subprocess.Popen(
-        ["cmd", "/c", str(script_path)],
-        cwd=str(APP_DIR),
-        creationflags=creation_flags,
-        close_fds=True,
-    )
-
-
 def show_update_prompt(release: dict, local_version: str) -> bool:
     title = "TNB LKS Automation Update"
     message = (
@@ -176,12 +131,10 @@ def show_update_prompt(release: dict, local_version: str) -> bool:
 
 def launch_target(target: str) -> int:
     target_path = APP_DIR / target
-    if target_path.suffix.lower() == ".py":
-        return subprocess.call([sys.executable, str(target_path)], cwd=str(APP_DIR))
-    return subprocess.call([str(target_path)], cwd=str(APP_DIR))
+    return subprocess.call([sys.executable, str(target_path)], cwd=str(APP_DIR))
 
 
-def check_and_apply_updates(interactive: bool, show_status: bool, launch_target_name: str) -> bool:
+def check_and_apply_updates(interactive: bool, show_status: bool) -> bool:
     local_version = get_local_version()
 
     try:
@@ -220,21 +173,13 @@ def check_and_apply_updates(interactive: bool, show_status: bool, launch_target_
     if interactive and not show_update_prompt(release, local_version):
         return False
 
-    temp_root = Path(os.environ.get("TEMP", APP_DIR)) / f"tnb_lks_update_{release['version'].replace('.', '_')}"
     try:
-        if temp_root.exists():
-            shutil.rmtree(temp_root)
-        temp_root.mkdir(parents=True, exist_ok=True)
-
-        archive_path = temp_root / "release.zip"
-        payload_dir = temp_root / "payload"
-        download_release_zip(release["zip_url"], archive_path)
-        unpacked_dir = unpack_release(archive_path, payload_dir)
-
-        if getattr(sys, "frozen", False) and sys.platform.startswith("win"):
-            schedule_windows_update(unpacked_dir, launch_target_name)
-        else:
-            apply_release(unpacked_dir)
+        with tempfile.TemporaryDirectory(prefix="tnb_lks_update_") as temp_dir:
+            temp_path = Path(temp_dir)
+            archive_path = temp_path / "release.zip"
+            download_release_zip(release["zip_url"], archive_path)
+            payload_dir = unpack_release(archive_path, temp_path / "payload")
+            apply_release(payload_dir)
     except Exception as exc:
         if interactive:
             messagebox.showerror(
@@ -264,10 +209,9 @@ def main() -> int:
     root = Tk()
     root.withdraw()
 
-    updated = check_and_apply_updates(
+    check_and_apply_updates(
         interactive=True,
         show_status=args.check_only,
-        launch_target_name=args.launch,
     )
 
     if args.check_only:
@@ -275,9 +219,6 @@ def main() -> int:
         return 0
 
     root.destroy()
-
-    if updated and getattr(sys, "frozen", False) and sys.platform.startswith("win"):
-        return 0
 
     if args.launch:
         return launch_target(args.launch)

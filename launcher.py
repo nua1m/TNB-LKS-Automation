@@ -6,31 +6,9 @@ import os
 from pathlib import Path
 
 
-def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
-
-
-APP_DIR = get_app_dir()
+APP_DIR = Path(__file__).resolve().parent
 VERSION_FILE = APP_DIR / "VERSION"
 VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "0.0.0"
-
-
-def get_processor_command(data_path: str) -> list[str]:
-    if getattr(sys, "frozen", False):
-        processor_exe = APP_DIR / "processor.exe"
-        return [str(processor_exe), data_path]
-
-    main_script = APP_DIR / "main.py"
-    return [sys.executable, str(main_script), data_path]
-
-
-def get_updater_command() -> list[str]:
-    if getattr(sys, "frozen", False):
-        return [str(APP_DIR / "updater.exe"), "--check-only"]
-
-    return [sys.executable, str(APP_DIR / "updater.py"), "--check-only"]
 
 def select_file():
     file_path = filedialog.askopenfilename(
@@ -50,12 +28,15 @@ def run_script():
         messagebox.showerror("File Not Found", f"Could not find:\n{data_path}")
         return
 
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    main_script = os.path.join(script_dir, "main.py")
+
     try:
         result = subprocess.run(
-            get_processor_command(data_path),
+            [sys.executable, main_script, data_path],
             capture_output=False,
             text=True,
-            cwd=str(APP_DIR),
+            cwd=script_dir,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"}
         )
         if result.returncode == 0:
@@ -67,9 +48,10 @@ def run_script():
 
 
 def check_for_updates():
+    updater_script = APP_DIR / "updater.py"
     try:
         subprocess.run(
-            get_updater_command(),
+            [sys.executable, str(updater_script), "--check-only"],
             check=False,
             cwd=str(APP_DIR),
         )

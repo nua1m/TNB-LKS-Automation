@@ -2,32 +2,82 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
-import sys
 import zipfile
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = PROJECT_ROOT / "dist"
-BUILD_DIR = PROJECT_ROOT / "build"
 VERSION_FILE = PROJECT_ROOT / "VERSION"
 APP_NAME = "TNB-LKS-Automation"
 MANIFEST_NAME = "release_manifest.json"
-RELEASE_ROOT = BUILD_DIR / "release-root"
+
+INCLUDE_FILES = [
+    "VERSION",
+    "README.md",
+    "requirements.txt",
+    "Run LKS Automation.bat",
+    "launcher.py",
+    "main.py",
+    "config.py",
+    "updater.py",
+    "LKS Template (M).xlsm",
+]
+
+INCLUDE_DIRS = [
+    "core",
+    "ui",
+]
+
+EXCLUDE_DIR_NAMES = {
+    "__pycache__",
+    ".git",
+    ".venv",
+    "dist",
+    "build",
+    "uploads",
+    "results",
+}
+
+EXCLUDE_SUFFIXES = {
+    ".pyc",
+}
 
 
 def get_version() -> str:
     return VERSION_FILE.read_text(encoding="utf-8").strip()
 
 
-def iter_release_files() -> list[Path]:
-    if not RELEASE_ROOT.exists():
-        raise FileNotFoundError(
-            f"Packaged release root not found: {RELEASE_ROOT}. Run scripts/build_windows_bundle.py first."
-        )
+def should_exclude(path: Path) -> bool:
+    return any(part in EXCLUDE_DIR_NAMES for part in path.parts) or path.suffix in EXCLUDE_SUFFIXES
 
-    return [path for path in RELEASE_ROOT.rglob("*") if path.is_file()]
+
+def iter_release_files() -> list[Path]:
+    files: list[Path] = []
+
+    for relative_name in INCLUDE_FILES:
+        candidate = PROJECT_ROOT / relative_name
+        if not candidate.exists():
+            raise FileNotFoundError(f"Required release file not found: {relative_name}")
+        files.append(candidate)
+
+    for relative_dir in INCLUDE_DIRS:
+        root = PROJECT_ROOT / relative_dir
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file() and not should_exclude(path.relative_to(PROJECT_ROOT)):
+                files.append(path)
+
+    # Preserve order while removing duplicates.
+    unique_files: list[Path] = []
+    seen: set[Path] = set()
+    for path in files:
+        relative = path.relative_to(PROJECT_ROOT)
+        if relative not in seen:
+            unique_files.append(path)
+            seen.add(relative)
+    return unique_files
 
 
 def build_manifest(version: str, archive_name: str, files: list[Path]) -> dict:
@@ -36,10 +86,9 @@ def build_manifest(version: str, archive_name: str, files: list[Path]) -> dict:
         "version": version,
         "archive_name": archive_name,
         "entrypoint": "Run LKS Automation.bat",
-        "launcher_binary": "launcher.exe",
-        "updater_binary": "updater.exe",
-        "processor_binary": "processor.exe",
-        "included_files": [str(path.relative_to(RELEASE_ROOT)).replace("\\", "/") for path in files],
+        "launch_script": "launcher.py",
+        "updater_script": "updater.py",
+        "included_files": [str(path.relative_to(PROJECT_ROOT)).replace("\\", "/") for path in files],
     }
 
 
@@ -53,7 +102,7 @@ def build_zip(version: str) -> Path:
 
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in files:
-            archive.write(path, arcname=path.relative_to(RELEASE_ROOT))
+            archive.write(path, arcname=path.relative_to(PROJECT_ROOT))
         archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2))
 
     manifest_path = DIST_DIR / MANIFEST_NAME
@@ -64,16 +113,9 @@ def build_zip(version: str) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the release ZIP consumed by the updater.")
     parser.add_argument("--version", default="", help="Override VERSION file value for the release artifact name.")
-    parser.add_argument(
-        "--skip-package",
-        action="store_true",
-        help="Skip rebuilding the Windows bundle before creating the release ZIP.",
-    )
     args = parser.parse_args()
 
     version = args.version.strip() or get_version()
-    if not args.skip_package:
-        subprocess.run([sys.executable, str(PROJECT_ROOT / "scripts" / "build_windows_bundle.py")], check=True)
     archive_path = build_zip(version)
     print(f"Built release artifact: {archive_path}")
     return 0
