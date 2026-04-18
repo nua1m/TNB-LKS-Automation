@@ -6,7 +6,7 @@ This project automates the preparation of *Laporan Kerja Selesai* (LKS) workbook
 
 The current app is a Windows desktop workflow built around:
 - a small Tkinter launcher for file selection
-- a Python processing pipeline for Excel transformation
+- a packaged Windows processor for Excel transformation
 - output generation into a formatted `.xlsm` workbook
 
 The immediate product direction is internal operational use first: make the tool easy to launch, update, and use for non-technical colleagues.
@@ -38,16 +38,17 @@ Milestone A is the internal distribution milestone. The current repo now include
 - `updater.py` checks GitHub Releases before launching the app
 - `VERSION` stores the local app version shown in the launcher
 - `launcher.py` displays the current app version and exposes a manual update check
+- `scripts/build_windows_bundle.py` produces `launcher.exe`, `updater.exe`, and `processor.exe`
 
 What is still needed to complete Milestone A:
-- publish versioned GitHub Releases with a ZIP artifact
-- package the app for cleaner Windows distribution
-- define safe upgrade rules for runtime folders and user-generated files
-- improve update status messaging and fallback behavior
+- validate the packaged release on the other laptop
+- define safer cleanup rules for removed files during updates
+- improve rollback and recovery behavior if a packaged update fails
 
 The release/update contract now uses:
 - `VERSION` as the local version source
-- `scripts/build_release.py` to produce the release ZIP
+- `scripts/build_release.py` to produce the packaged release ZIP
+- `scripts/build_windows_bundle.py` to build the Windows executables
 - `.github/workflows/release.yml` to publish tagged releases to GitHub
 - `docs/RELEASE_PROCESS.md` as the release operator guide
 
@@ -95,6 +96,7 @@ If the tool is later sold to other vendors, the app should move toward:
 - Pandas for data processing
 - OpenPyXL and Xlwings for Excel handling
 - Requests and BeautifulSoup4 for supporting data and image workflows
+- PyInstaller for packaged Windows builds
 
 ## Local Run
 
@@ -122,8 +124,15 @@ Build the release ZIP:
 .venv\Scripts\python.exe scripts\build_release.py
 ```
 
+Build the packaged Windows bundle only:
+
+```powershell
+.venv\Scripts\python.exe scripts\build_windows_bundle.py
+```
+
 ## Notes
 
 - The updater depends on GitHub Releases, not Git pulls on the user machine.
 - Until releases are published, the updater stays quiet during normal launch and will report release status only when the user clicks `Check Updates`.
+- The release ZIP now ships packaged Windows executables so the target laptop no longer needs a Python environment from the release artifact itself.
 - Proprietary TNB data and customer-specific material should stay out of the repository.

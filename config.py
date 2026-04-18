@@ -51,6 +51,14 @@ SERVICE_ORDER_COL_IDX = 2    # Column B in CLAIM/ATTACHMENT
 # OTHER CONSTANTS
 # ================================================================
 # Add more here if other modules need configuration
-# Template file should be in the same directory as the script
-import os as _os
-DEFAULT_TEMPLATE_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "LKS Template (M).xlsm")
+import sys as _sys
+from pathlib import Path as _Path
+
+
+def _get_app_dir() -> _Path:
+    if getattr(_sys, "frozen", False):
+        return _Path(_sys.executable).resolve().parent
+    return _Path(__file__).resolve().parent
+
+
+DEFAULT_TEMPLATE_PATH = str(_get_app_dir() / "LKS Template (M).xlsm")
