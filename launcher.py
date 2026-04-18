@@ -3,6 +3,12 @@ from tkinter import filedialog, messagebox
 import subprocess
 import sys
 import os
+from pathlib import Path
+
+
+APP_DIR = Path(__file__).resolve().parent
+VERSION_FILE = APP_DIR / "VERSION"
+VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "0.0.0"
 
 def select_file():
     file_path = filedialog.askopenfilename(
@@ -40,11 +46,25 @@ def run_script():
     except Exception as e:
         messagebox.showerror("Error", str(e))
 
+
+def check_for_updates():
+    updater_script = APP_DIR / "updater.py"
+    try:
+        subprocess.run(
+            [sys.executable, str(updater_script), "--check-only"],
+            check=False,
+            cwd=str(APP_DIR),
+        )
+    except Exception as exc:
+        messagebox.showerror("Update Check Failed", str(exc))
+
+
 root = tk.Tk()
-root.title("TNB LKS Automation")
-root.geometry("600x120")
+root.title(f"TNB LKS Automation v{VERSION}")
+root.geometry("600x150")
 root.resizable(False, False)
 
+tk.Label(root, text=f"Version {VERSION}", fg="#666666").pack(pady=(10, 0))
 tk.Label(root, text="Select LKS Data File:").pack(pady=(15, 5))
 
 frame = tk.Frame(root)
@@ -57,5 +77,6 @@ entry.pack(side="left", fill="x", expand=True)
 tk.Button(frame, text="Browse...", command=select_file).pack(side="right", padx=(5, 0))
 
 tk.Button(root, text="RUN", command=run_script, bg="#4CAF50", fg="white", width=15).pack(pady=(0, 15))
+tk.Button(root, text="Check Updates", command=check_for_updates, width=15).pack(pady=(0, 10))
 
 root.mainloop()

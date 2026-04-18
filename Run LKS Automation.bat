@@ -1,4 +1,12 @@
 @echo off
-cd /d "%~d0\Users\bsglo\OneDrive\Desktop\TnB\TNB-LKS-Automation"
-python launcher.py
+setlocal
+cd /d "%~dp0"
+
+if exist ".venv\Scripts\python.exe" (
+    set "PYTHON_EXE=.venv\Scripts\python.exe"
+) else (
+    set "PYTHON_EXE=python"
+)
+
+"%PYTHON_EXE%" updater.py --launch launcher.py
 pause
