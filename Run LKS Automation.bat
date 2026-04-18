@@ -38,6 +38,15 @@ pause
 exit /b 0
 
 :find_python
+where python >nul 2>nul
+if not errorlevel 1 (
+    python -c "import sys" >nul 2>nul
+    if not errorlevel 1 (
+        set "BOOTSTRAP_MODE=PYTHON"
+        exit /b 0
+    )
+)
+
 where py >nul 2>nul
 if not errorlevel 1 (
     py -3.11 -c "import sys" >nul 2>nul
@@ -71,10 +80,6 @@ if not errorlevel 1 (
     )
 )
 
-where python >nul 2>nul
-if not errorlevel 1 (
-    set "BOOTSTRAP_MODE=PYTHON"
-)
 exit /b 0
 
 :create_venv
