@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ PRESERVE_TOP_LEVEL = {
     "results",
     "uploads",
 }
+REQ_MARKER = APP_DIR / ".venv" / "requirements.sha256"
 
 
 def parse_version(raw: str) -> tuple[int, ...]:
@@ -118,6 +120,27 @@ def apply_release(payload_dir: Path) -> None:
         shutil.copy2(source_path, destination)
 
 
+def calculate_requirements_hash() -> str:
+    requirements_path = APP_DIR / "requirements.txt"
+    digest = hashlib.sha256(requirements_path.read_bytes()).hexdigest().upper()
+    return digest
+
+
+def sync_requirements() -> None:
+    requirements_path = APP_DIR / "requirements.txt"
+    if not requirements_path.exists():
+        return
+
+    current_hash = calculate_requirements_hash()
+    installed_hash = REQ_MARKER.read_text(encoding="utf-8").strip() if REQ_MARKER.exists() else ""
+    if current_hash == installed_hash:
+        return
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(requirements_path)], cwd=str(APP_DIR))
+    REQ_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    REQ_MARKER.write_text(current_hash + "\n", encoding="utf-8")
+
+
 def show_update_prompt(release: dict, local_version: str) -> bool:
     title = "TNB LKS Automation Update"
     message = (
@@ -180,6 +203,7 @@ def check_and_apply_updates(interactive: bool, show_status: bool) -> bool:
             download_release_zip(release["zip_url"], archive_path)
             payload_dir = unpack_release(archive_path, temp_path / "payload")
             apply_release(payload_dir)
+            sync_requirements()
     except Exception as exc:
         if interactive:
             messagebox.showerror(
