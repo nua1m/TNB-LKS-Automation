@@ -61,7 +61,7 @@ class DateEngine:
         1. Effective Date = OCR if present, else Status.
         2. Diskon = (OCR is present AND OCR != Status).
         3. Hari = "Hujung Minggu" if Effective is Sunday.
-        4. Remarks 2 = "TASK FORCE" if Effective is Saturday.
+        4. Remarks 2 is currently disabled.
         5. Remarks 1 = "TECO LEWAT..." if Diskon.
         """
         status_date = DateEngine.parse_date(status_date_str)
@@ -86,10 +86,6 @@ class DateEngine:
             # Sunday Rule
             if effective_date.weekday() == 6:
                 hari_field = "Hujung Minggu"
-            
-            # Saturday Rule -> Task Force
-            if effective_date.weekday() == 5:
-                remarks_2 = "TASK FORCE"
 
         if is_diskon:
             remarks_1 = f"TECO LEWAT SEBAB DISKON ({effective_date.strftime('%d %b %Y')})"

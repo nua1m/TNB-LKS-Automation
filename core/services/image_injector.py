@@ -21,12 +21,32 @@ class ImageInjector:
             return "card"
         
         # NEW METER
-        # Typos: newmeter, nee_meter, new_meer, new_metwr
-        if any(x in filename for x in ["new_meter", "newmeter", "nee_meter", "new_metwr"]):
+        # Typos: newmeter, nee_meter, new_meer, new_metwr, mew_meter, ew_meter
+        if any(
+            x in filename
+            for x in [
+                "new_meter",
+                "newmeter",
+                "nee_meter",
+                "new_metwr",
+                "new_meer",
+                "mew_meter",
+                "mewmeter",
+                "ew_meter",
+                "ewmeter",
+                "nw_meter",
+                "new_mter",
+                "new_metr",
+                "newmeterr",
+            ]
+        ):
             return "new"
             
         # Fallback fuzzy for new meter
-        if "new_m" in filename and ("eer" in filename or "ter" in filename or "etr" in filename): 
+        if (
+            ("new_m" in filename or "mew_m" in filename or "ew_m" in filename)
+            and ("eer" in filename or "ter" in filename or "etr" in filename or "meter" in filename)
+        ):
             return "new"
         
         return None

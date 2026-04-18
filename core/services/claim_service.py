@@ -19,6 +19,7 @@ def get_business_area(site_id):
     s = str(site_id).strip()
     if s == "6340": return "Johor Bahru"
     if s == "6346": return "Johor Jaya"
+    if s == "6410": return "KOTA BHARU"
     return ""
 
 class ClaimService:
@@ -58,6 +59,8 @@ class ClaimService:
             "Site ID": COL_SITE_ID, "SITE ID": COL_SITE_ID,
             "Old Meter no": COL_OLD_METER, "Old Meter No": COL_OLD_METER, "OLD METER NO": COL_OLD_METER,
             "New Meter no": COL_NEW_METER, "New Meter No": COL_NEW_METER, "NEW METER NO": COL_NEW_METER,
+            "Mew Meter no": COL_NEW_METER, "Mew Meter No": COL_NEW_METER, "MEW METER NO": COL_NEW_METER,
+            "Ew Meter no": COL_NEW_METER, "Ew Meter No": COL_NEW_METER, "EW METER NO": COL_NEW_METER,
             "New Comm Module": COL_NEW_COMM, "NEW COMM MODULE": COL_NEW_COMM,
         })
 
