@@ -2,12 +2,15 @@
 
 ## Overview
 
-This project automates the preparation of *Laporan Kerja Selesai* (LKS) workbooks for TNB smart meter installation reporting.
+This project automates two internal Excel-heavy workflows:
 
-The current app is a Windows desktop workflow built around:
+- preparation of *Laporan Kerja Selesai* (LKS) workbooks for TNB smart meter installation reporting
+- generation of worker payslips from the TNB salary calculation workbook
+
+The current app family is built around:
 - a PySide6/Qt desktop launcher for file selection and run monitoring
 - a Python processing pipeline for Excel transformation
-- output generation into a formatted `.xlsm` workbook
+- Excel template filling and PDF export where required
 
 The immediate product direction is internal operational use first: make the tool easy to launch, update, and use for non-technical colleagues.
 
@@ -22,14 +25,39 @@ The immediate product direction is internal operational use first: make the tool
 - inject image evidence into the output workbook
 - detect missing image slots and highlight defective rows
 - save a final `.xlsm` file based on the bundled template
+- optionally read one or more LKS `CLAIM` sheets and auto-fill the TNB salary calculation workbook
+- generate helper, installer, and supervisor payslips from a filled TNB calculation workbook
+- export payslips as both `.xlsx` and `.pdf`
 
 ## Current Desktop Flow
 
 1. Launch `Run LKS Automation.bat`
 2. The updater checks GitHub Releases for a newer version
 3. If an update exists, the user can approve the update
-4. The launcher opens and prompts for the input Excel file
-5. The processing pipeline generates the LKS output workbook
+4. The desktop app opens with tabs for `LKS Automation` and `Payslip Generator`
+5. Use the `LKS Automation` tab to select the input workbook and process it
+
+## Payslip Generator Flow
+
+1. Launch `Run LKS Automation.bat`
+2. Open the `Payslip Generator` tab
+3. Select the filled `TNBGAJICALCULATION.xlsx`
+4. Select the worker master workbook
+5. Optionally select one or more LKS files to auto-build the calculation workbook from the `CLAIM` sheet
+6. Enter the salary month and payment date
+7. Generate Excel payslips and PDF copies for all workers in one run
+
+The current v1 source of truth is the final combined payroll block inside `TNBGAJICALCULATION.xlsx`.
+The app does not re-calculate payroll rules in Python. It copies the workbook output into the payslip templates.
+The current payslip export uses the single template `Masburan Salary Template.xlsx`.
+The deduction shown on the payslip is fixed at `RM180`, as confirmed for the current workflow.
+
+The current LKS-to-calculation automation uses these `CLAIM` fields:
+- `Labor` -> team code, with `ZMRT####` normalized to `KMRT####`
+- `Voltage` -> `PH1` / `PH3` using `01 -> PH1` and `02 -> PH3`
+- `Hari Biasa / Hujung Minggu / Cuti Umum` -> day bucket
+
+Rows with missing or invalid values in those fields are skipped.
 
 ## Milestone A Status
 
@@ -142,6 +170,12 @@ Build the release ZIP:
 
 ```powershell
 .venv\Scripts\python.exe scripts\build_release.py
+```
+
+Run the payslip tool directly:
+
+```powershell
+python updater.py --launch payslip_launcher.py
 ```
 
 ## Notes

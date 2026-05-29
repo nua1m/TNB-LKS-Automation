@@ -6,5 +6,8 @@ Data/
 .DS_Store
 dist/
 build/
+results/
+payslip_launcher_error.log
+frontend/node_modules/
 
 .agent/

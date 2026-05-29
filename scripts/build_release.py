@@ -17,9 +17,13 @@ INCLUDE_FILES = [
     "README.md",
     "requirements.txt",
     "Run LKS Automation.bat",
+    "Run Payslip Generator.bat",
     "launcher.py",
+    "modern_shell.py",
+    "payslip_launcher.py",
     "main.py",
     "config.py",
+    "ui_theme.py",
     "updater.py",
     "LKS Template (M).xlsm",
 ]
@@ -27,6 +31,8 @@ INCLUDE_FILES = [
 INCLUDE_DIRS = [
     "core",
     "ui",
+    "docs",
+    "web_ui",
 ]
 
 EXCLUDE_DIR_NAMES = {
@@ -49,7 +55,11 @@ def get_version() -> str:
 
 
 def should_exclude(path: Path) -> bool:
-    return any(part in EXCLUDE_DIR_NAMES for part in path.parts) or path.suffix in EXCLUDE_SUFFIXES
+    return (
+        any(part in EXCLUDE_DIR_NAMES for part in path.parts)
+        or path.suffix in EXCLUDE_SUFFIXES
+        or path.name.startswith("~$")
+    )
 
 
 def iter_release_files() -> list[Path]:
@@ -86,7 +96,7 @@ def build_manifest(version: str, archive_name: str, files: list[Path]) -> dict:
         "version": version,
         "archive_name": archive_name,
         "entrypoint": "Run LKS Automation.bat",
-        "launch_script": "launcher.py",
+        "launch_script": "modern_shell.py",
         "updater_script": "updater.py",
         "included_files": [str(path.relative_to(PROJECT_ROOT)).replace("\\", "/") for path in files],
     }

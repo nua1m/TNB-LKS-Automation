@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 215 28% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+    --primary: 145 76% 27%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 24% 96%;
+    --secondary-foreground: 215 25% 27%;
+    --muted: 210 24% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 145 45% 95%;
+    --accent-foreground: 145 76% 22%;
+    --destructive: 0 68% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 145 76% 27%;
+    --success-foreground: 0 0% 100%;
+    --border: 214 22% 88%;
+    --input: 214 22% 86%;
+    --ring: 145 76% 27%;
+    --radius: 1rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply overflow-hidden bg-background text-foreground font-sans antialiased;
+  }
+
+  input[type="date"].calendar-input {
+    appearance: none;
+    -webkit-appearance: none;
+    min-width: 0;
+  }
+
+  input[type="date"].calendar-input::-webkit-datetime-edit {
+    padding: 0;
+  }
+
+  input[type="date"].calendar-input::-webkit-calendar-picker-indicator {
+    opacity: 0.72;
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .surface {
+    @apply rounded-[20px] border border-border bg-card shadow-panel;
+  }
+
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground;
+  }
+}

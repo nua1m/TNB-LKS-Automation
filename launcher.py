@@ -7,10 +7,11 @@ from pathlib import Path
 
 from config import DEFAULT_TEMPLATE_PATH
 from main import run_process
+from ui_theme import apply_app_palette, panel_stylesheet, tab_stylesheet
 
 try:
     from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal
-    from PySide6.QtGui import QColor, QDesktopServices, QFont, QPalette
+    from PySide6.QtGui import QDesktopServices, QFont
     from PySide6.QtWidgets import (
         QApplication,
         QDialog,
@@ -24,6 +25,7 @@ try:
         QMessageBox,
         QPlainTextEdit,
         QPushButton,
+        QTabWidget,
         QSizePolicy,
         QVBoxLayout,
         QWidget,
@@ -199,7 +201,7 @@ class FileDropArea(QFrame):
         event.ignore()
 
 
-class LauncherWindow(QMainWindow):
+class LksPanel(QWidget):
     def __init__(self):
         super().__init__()
 
@@ -210,10 +212,6 @@ class LauncherWindow(QMainWindow):
         self.worker_thread: QThread | None = None
         self.worker: ProcessorWorker | None = None
 
-        self.setWindowTitle(f"TNB LKS Automation v{VERSION}")
-        self.resize(1180, 780)
-        self.setMinimumSize(1020, 700)
-
         self._build_ui()
         self._apply_theme()
         self.info_dialog = InfoDialog(self)
@@ -222,10 +220,7 @@ class LauncherWindow(QMainWindow):
         self._refresh_info_dialog()
 
     def _build_ui(self) -> None:
-        central = QWidget()
-        self.setCentralWidget(central)
-
-        root_layout = QVBoxLayout(central)
+        root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(24, 24, 24, 24)
         root_layout.setSpacing(18)
 
@@ -360,157 +355,7 @@ class LauncherWindow(QMainWindow):
         return card
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(
-            """
-            QWidget {
-                background: #f6f7f9;
-                color: #182230;
-                font-family: "Inter", "Segoe UI";
-                font-size: 10pt;
-            }
-            QMainWindow {
-                background: #f6f7f9;
-            }
-            QLabel#pageTitle {
-                font-size: 22pt;
-                font-weight: 700;
-                color: #111827;
-            }
-            QFrame#fileDropArea {
-                background: #fbfcfd;
-                border: 2px dashed #d7e0ea;
-                border-radius: 12px;
-            }
-            QFrame#fileDropArea[dragActive="true"] {
-                background: #f2f7ff;
-                border: 2px dashed #7aa2e3;
-            }
-            QLabel#dropTitle {
-                color: #111827;
-                font-size: 12pt;
-                font-weight: 700;
-            }
-            QLabel#dropText {
-                color: #334155;
-                font-size: 10pt;
-                font-weight: 600;
-            }
-            QLabel#dropHint {
-                color: #6b7280;
-                font-size: 9pt;
-            }
-            QGroupBox {
-                background: white;
-                border: 1px solid #e4e9ef;
-                border-radius: 10px;
-                font-weight: 600;
-                margin-top: 10px;
-                padding-top: 14px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 16px;
-                padding: 0 4px;
-                color: #1f2937;
-            }
-            QLabel#mutedText {
-                color: #667085;
-            }
-            QPushButton#infoButton {
-                min-width: 32px;
-                max-width: 32px;
-                min-height: 32px;
-                max-height: 32px;
-                background: #ffffff;
-                border: 1px solid #dfe5ec;
-                border-radius: 10px;
-                color: #4b5563;
-                font-size: 12pt;
-                font-weight: 700;
-                padding: 0px;
-            }
-            QPushButton#infoButton:hover {
-                background: #f6f8fb;
-            }
-            QLineEdit, QPlainTextEdit {
-                background: #fcfdff;
-                border: 1px solid #dde4ec;
-                border-radius: 8px;
-                padding: 11px 13px;
-            }
-            QLineEdit:focus, QPlainTextEdit:focus {
-                border: 1px solid #8aa6d6;
-            }
-            QPushButton {
-                background: #ffffff;
-                border: 1px solid #dde4ec;
-                border-radius: 8px;
-                padding: 10px 15px;
-                font-weight: 600;
-                color: #243041;
-            }
-            QPushButton:hover {
-                background: #f6f8fb;
-            }
-            QPushButton:disabled {
-                background: #f8fafc;
-                color: #9aa5b1;
-                border-color: #e5eaf0;
-            }
-            QPushButton#primaryButton {
-                background: #1f7a4f;
-                border: 1px solid #1f7a4f;
-                color: white;
-            }
-            QPushButton#primaryButton:hover {
-                background: #1a6844;
-            }
-            QPlainTextEdit#summaryPane {
-                background: #fcfdff;
-                color: #243041;
-                border: 1px solid #e1e7ee;
-                font-size: 10pt;
-            }
-            QPlainTextEdit#logPane {
-                background: #fcfdff;
-                color: #344054;
-                border: 1px solid #e1e7ee;
-            }
-            QScrollBar:vertical {
-                background: transparent;
-                width: 12px;
-                margin: 8px 3px 8px 3px;
-            }
-            QScrollBar::handle:vertical {
-                background: #c4cfdb;
-                min-height: 36px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #aab9ca;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: transparent;
-            }
-            QLabel#infoDialogTitle {
-                color: #1f2937;
-                font-size: 12pt;
-                font-weight: 700;
-            }
-            QLabel#infoLabel {
-                color: #667085;
-                font-size: 9pt;
-                font-weight: 600;
-            }
-            QLabel#infoValue {
-                color: #1f2937;
-                font-size: 10pt;
-            }
-            """
-        )
+        self.setStyleSheet(panel_stylesheet())
 
     def _set_status(self, text: str) -> None:
         return None
@@ -757,17 +602,31 @@ class LauncherWindow(QMainWindow):
         self.summary_text.setPlainText("\n".join(lines))
 
 
+class LauncherWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"TNB LKS Automation v{VERSION}")
+        self.resize(1240, 820)
+        self.setMinimumSize(1080, 720)
+
+        from payslip_launcher import PayslipPanel
+
+        tabs = QTabWidget()
+        tabs.setObjectName("workspaceTabs")
+        tabs.setDocumentMode(True)
+        tabs.addTab(LksPanel(), "LKS Automation")
+        tabs.addTab(PayslipPanel(), "Payslip Generator")
+        tabs.setStyleSheet(tab_stylesheet())
+        self.setCentralWidget(tabs)
+
+
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("TNB LKS Automation")
     app.setOrganizationName("TNB LKS")
     app.setStyle("Fusion")
 
-    palette = app.palette()
-    palette.setColor(QPalette.Window, QColor("#f3f6fb"))
-    palette.setColor(QPalette.Base, QColor("#fbfdff"))
-    palette.setColor(QPalette.Button, QColor("#eef3f9"))
-    app.setPalette(palette)
+    app.setPalette(apply_app_palette(app.palette()))
 
     window = LauncherWindow()
     window.showMaximized()

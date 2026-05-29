@@ -40,9 +40,9 @@ if errorlevel 1 (
 )
 
 if exist "%VENV_PYW%" (
-    start "" "%VENV_PYW%" updater.py --launch launcher.py
+    start "" "%VENV_PYW%" updater.py --launch modern_shell.py
 ) else (
-    start "" "%VENV_PY%" updater.py --launch launcher.py
+    start "" "%VENV_PY%" updater.py --launch modern_shell.py
 )
 goto :done
 
