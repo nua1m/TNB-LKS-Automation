@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 Data/
 *.xlsx
+!docs/Auto-Payslip/TNBGAJICALCULATION.xlsx
+!docs/Auto-Payslip/CONSTRUCTION TEAM BSG.xlsx
+!docs/Auto-Payslip/Masburan Salary Template.xlsx
 ~$*
 .DS_Store
 dist/
