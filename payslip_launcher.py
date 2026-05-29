@@ -67,6 +67,7 @@ try:
         DEFAULT_LKS_SAMPLE_PATH,
         DEFAULT_MASTER_PATH,
         DEFAULT_OUTPUT_DIR,
+        format_claim_summary_lines,
         generate_payslips,
     )
 except Exception as exc:  # pragma: no cover - startup diagnostics
@@ -153,6 +154,12 @@ class PayslipWorker(QObject):
                 payment_date=self.payment_date,
                 lks_paths=self.lks_paths,
             )
+            if result.claim_summary is not None:
+                for line in format_claim_summary_lines(result.claim_summary):
+                    self.log_message.emit(line)
+            self.log_message.emit(f"Generated Excel payslips: {result.generated_xlsx_count}")
+            self.log_message.emit(f"Generated PDF payslips: {result.generated_pdf_count}")
+            self.log_message.emit(f"Output folder: {result.output_dir}")
         except Exception as exc:
             self.failed.emit(str(exc))
             return

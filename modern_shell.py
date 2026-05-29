@@ -14,6 +14,7 @@ from core.services.payslip_service import (
     DEFAULT_LKS_SAMPLE_PATH,
     DEFAULT_MASTER_PATH,
     DEFAULT_OUTPUT_DIR,
+    format_claim_summary_lines,
     generate_payslips,
 )
 from main import run_process
@@ -118,6 +119,12 @@ class WebPayslipWorker(QObject):
                 payment_date=self.payment_date,
                 lks_paths=self.lks_paths,
             )
+            if result.claim_summary is not None:
+                for line in format_claim_summary_lines(result.claim_summary):
+                    self.log_message.emit(line)
+            self.log_message.emit(f"Generated Excel payslips: {result.generated_xlsx_count}")
+            self.log_message.emit(f"Generated PDF payslips: {result.generated_pdf_count}")
+            self.log_message.emit(f"Output folder: {result.output_dir}")
         except Exception as exc:
             self.failed.emit(str(exc))
             return
@@ -417,6 +424,15 @@ class Bridge(QObject):
                             "totalRows": result.claim_summary.total_rows,
                             "countedRows": result.claim_summary.counted_rows,
                             "skippedRows": result.claim_summary.skipped_rows,
+                            "fileSummaries": [
+                                {
+                                    "fileName": file_summary.file_name,
+                                    "totalRows": file_summary.total_rows,
+                                    "countedRows": file_summary.counted_rows,
+                                    "skippedRows": file_summary.skipped_rows,
+                                }
+                                for file_summary in result.claim_summary.file_summaries
+                            ],
                         }
                         if result.claim_summary
                         else None

@@ -117,12 +117,22 @@ class GeneratedPayslip:
 
 
 @dataclass(frozen=True)
+class FileClaimSummary:
+    file_name: str
+    total_rows: int
+    counted_rows: int
+    skipped_rows: int
+    counts_by_team: dict[str, tuple[float, float, float, float, float, float]]
+
+
+@dataclass(frozen=True)
 class ClaimCountSummary:
     source_files: int
     total_rows: int
     counted_rows: int
     skipped_rows: int
     counts_by_team: dict[str, tuple[float, float, float, float, float, float]]
+    file_summaries: list[FileClaimSummary]
     warnings: list[str]
 
 
@@ -277,11 +287,15 @@ def _find_claim_header_row(worksheet) -> tuple[int, dict[str, int]]:
 
 def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
     counts: dict[str, list[float]] = {team_code: [0.0] * 6 for team_code in VALID_TEAM_CODES}
+    file_summaries: list[FileClaimSummary] = []
     warnings: list[str] = []
     total_rows = 0
     counted_rows = 0
 
     for lks_path in lks_paths:
+        file_counts: dict[str, list[float]] = {team_code: [0.0] * 6 for team_code in VALID_TEAM_CODES}
+        file_total_rows = 0
+        file_counted_rows = 0
         workbook = load_workbook(lks_path, read_only=True, data_only=True)
         try:
             if "CLAIM" not in workbook.sheetnames:
@@ -297,6 +311,7 @@ def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
                 day_type = _normalize_day_type(worksheet.cell(row=row_idx, column=column_map["day_type"]).value)
 
                 total_rows += 1
+                file_total_rows += 1
                 if team_code is None or phase is None or day_type is None:
                     continue
 
@@ -306,9 +321,21 @@ def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
 
                 count_index = COUNT_CELL_ORDER.index(column)
                 counts[team_code][count_index] += 1.0
+                file_counts[team_code][count_index] += 1.0
                 counted_rows += 1
+                file_counted_rows += 1
         finally:
             workbook.close()
+
+        file_summaries.append(
+            FileClaimSummary(
+                file_name=lks_path.name,
+                total_rows=file_total_rows,
+                counted_rows=file_counted_rows,
+                skipped_rows=file_total_rows - file_counted_rows,
+                counts_by_team={team_code: tuple(values) for team_code, values in file_counts.items()},
+            )
+        )
 
     return ClaimCountSummary(
         source_files=len(lks_paths),
@@ -316,6 +343,7 @@ def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
         counted_rows=counted_rows,
         skipped_rows=total_rows - counted_rows,
         counts_by_team={team_code: tuple(values) for team_code, values in counts.items()},
+        file_summaries=file_summaries,
         warnings=warnings + (["No valid CLAIM rows were counted from the selected LKS files."] if counted_rows == 0 else []),
     )
 
@@ -360,6 +388,48 @@ def create_calculation_workbook(
         return output_path, claim_summary
     finally:
         workbook.close()
+
+
+def format_claim_summary_lines(claim_summary: ClaimCountSummary) -> list[str]:
+    lines = [
+        f"LKS files used: {claim_summary.source_files}",
+        f"Total CLAIM rows: {claim_summary.total_rows}",
+        f"Counted CLAIM rows: {claim_summary.counted_rows}",
+        f"Skipped CLAIM rows: {claim_summary.skipped_rows}",
+    ]
+
+    for file_summary in claim_summary.file_summaries:
+        lines.append("")
+        lines.append(f"{file_summary.file_name}")
+        lines.append(f"Counted rows: {file_summary.counted_rows}/{file_summary.total_rows}")
+        if file_summary.skipped_rows:
+            lines.append(f"  Skipped rows: {file_summary.skipped_rows}")
+        lines.extend(_format_team_count_lines(file_summary.counts_by_team))
+
+    lines.append("")
+    lines.append("Combined team totals:")
+    lines.extend(_format_team_count_lines(claim_summary.counts_by_team))
+    return lines
+
+
+def _format_team_count_lines(
+    counts_by_team: dict[str, tuple[float, float, float, float, float, float]],
+) -> list[str]:
+    lines = [
+        "TEAM     TOTAL  HB-P1  HB-P3  HM-P1  HM-P3  CU-P1  CU-P3",
+        "-------  -----  -----  -----  -----  -----  -----  -----",
+    ]
+    for team_code in VALID_TEAM_CODES:
+        values = counts_by_team.get(team_code, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+        if not any(values):
+            continue
+        hb_ph1, hb_ph3, hm_ph1, hm_ph3, cu_ph1, cu_ph3 = values
+        total = int(sum(values))
+        lines.append(
+            f"{team_code:<7}  {total:>5}  {int(hb_ph1):>5}  {int(hb_ph3):>5}  "
+            f"{int(hm_ph1):>5}  {int(hm_ph3):>5}  {int(cu_ph1):>5}  {int(cu_ph3):>5}"
+        )
+    return lines
 
 
 def recalculate_workbook(workbook_path: Path) -> None:
@@ -548,7 +618,7 @@ def populate_payslip_template(entry: PayslipEntry, output_path: Path) -> None:
             for row, value in zip(COUNT_TEMPLATE_ROWS, entry.counts):
                 worksheet[f"F{row}"] = value
 
-            worksheet["D23"] = "TASK FORCE ADD-ON" if abs(entry.task_force_add_on) > 0.0001 else ""
+            worksheet["D23"] = "TASK FORCE / KIV ADD-ON" if abs(entry.task_force_add_on) > 0.0001 else ""
             worksheet["G23"] = entry.task_force_add_on if abs(entry.task_force_add_on) > 0.0001 else None
 
             _clear_range(worksheet, ["J14", "J15", "J16", "J17"])

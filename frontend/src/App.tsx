@@ -66,6 +66,12 @@ type DesktopEvent =
           totalRows: number;
           countedRows: number;
           skippedRows: number;
+          fileSummaries: Array<{
+            fileName: string;
+            totalRows: number;
+            countedRows: number;
+            skippedRows: number;
+          }>;
         } | null;
       };
     }
@@ -172,13 +178,6 @@ const lksSummarySchema: Array<{ key: string; label: string }> = [
   { key: "Missing CARD", label: "Missing card" },
   { key: "Missing NEW meter", label: "Missing new" },
   { key: "Execution time", label: "Execution time" },
-];
-
-const payslipSummarySchema: Array<{ key: string; label: string }> = [
-  { key: "Excel Payslips", label: "Excel payslips" },
-  { key: "PDF Payslips", label: "PDF payslips" },
-  { key: "CLAIM Rows Counted", label: "CLAIM counted" },
-  { key: "CLAIM Rows Skipped", label: "CLAIM skipped" },
 ];
 
 function App() {
@@ -290,7 +289,7 @@ function App() {
     if (payload.type === "log" && payload.module === "lks") {
       setLks((current) => ({
         ...current,
-        logLines: [...trimPlaceholder(current.logLines, "No run started yet."), payload.message],
+        logLines: appendUniqueLog(current.logLines, "No run started yet.", payload.message),
       }));
       return;
     }
@@ -298,7 +297,7 @@ function App() {
     if (payload.type === "log" && payload.module === "payslip") {
       setPayslip((current) => ({
         ...current,
-        logLines: [...trimPlaceholder(current.logLines, "No generation started yet."), payload.message],
+        logLines: appendUniqueLog(current.logLines, "No generation started yet.", payload.message),
       }));
       return;
     }
@@ -548,22 +547,7 @@ function App() {
     [lks.summary],
   );
   const payslipSummaryMetrics = useMemo(
-    () =>
-      buildMetricItems(
-        payslipSummarySchema,
-        payslip.summary
-          ? {
-              "Excel Payslips": payslip.summary.generatedXlsxCount,
-              "PDF Payslips": payslip.summary.generatedPdfCount,
-              ...(payslip.summary.claimSummary
-                ? {
-                    "CLAIM Rows Counted": payslip.summary.claimSummary.countedRows,
-                    "CLAIM Rows Skipped": payslip.summary.claimSummary.skippedRows,
-                  }
-                : {}),
-            }
-          : null,
-      ),
+    () => buildPayslipMetricItems(payslip.summary),
     [payslip.summary],
   );
 
@@ -1025,6 +1009,35 @@ function buildMetricItems(
   }));
 }
 
+function buildPayslipMetricItems(summary: PayslipRunResult | null) {
+  const items: Array<{ key: string; label: string; value: string }> = [
+    {
+      key: "total-sos",
+      label: "Total SOs",
+      value: summary?.claimSummary ? String(summary.claimSummary.countedRows) : "--",
+    },
+  ];
+
+  const fileSummaries = summary?.claimSummary?.fileSummaries ?? [];
+  fileSummaries.forEach((fileSummary, index) => {
+    items.push({
+      key: `${fileSummary.fileName}-${index}`,
+      label: simplifyLksFileLabel(fileSummary.fileName, index),
+      value: String(fileSummary.countedRows),
+    });
+  });
+
+  return items;
+}
+
+function simplifyLksFileLabel(fileName: string, index: number) {
+  const match = fileName.match(/lks\s*(\d+)/i);
+  if (match) {
+    return `LKS ${match[1]} SOs`;
+  }
+  return `LKS ${index + 1} SOs`;
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-background px-3 py-3">
@@ -1065,6 +1078,14 @@ function bridgeCall<T>(
 
 function trimPlaceholder(values: string[], placeholder: string) {
   return values.length === 1 && values[0] === placeholder ? [] : values;
+}
+
+function appendUniqueLog(values: string[], placeholder: string, nextLine: string) {
+  const base = trimPlaceholder(values, placeholder);
+  if (base[base.length - 1] === nextLine) {
+    return base;
+  }
+  return [...base, nextLine];
 }
 
 function basename(path: string) {
