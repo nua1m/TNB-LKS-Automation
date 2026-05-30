@@ -41,6 +41,9 @@ CLAIM_REQUIRED_HEADERS = {
     "Voltage": "voltage",
     "Hari Biasa / Hujung Minggu / Cuti Umum": "day_type",
 }
+CLAIM_OPTIONAL_HEADERS = {
+    "REMARKS 2": "remarks_2",
+}
 DAY_TYPE_TO_COLUMN = {
     ("HARI BIASA", "PH1"): "C",
     ("HARI BIASA", "PH3"): "D",
@@ -123,6 +126,7 @@ class FileClaimSummary:
     counted_rows: int
     skipped_rows: int
     counts_by_team: dict[str, tuple[float, float, float, float, float, float]]
+    kiv_counts_by_team: dict[str, tuple[float, float]]
 
 
 @dataclass(frozen=True)
@@ -132,6 +136,7 @@ class ClaimCountSummary:
     counted_rows: int
     skipped_rows: int
     counts_by_team: dict[str, tuple[float, float, float, float, float, float]]
+    kiv_counts_by_team: dict[str, tuple[float, float]]
     file_summaries: list[FileClaimSummary]
     warnings: list[str]
 
@@ -271,6 +276,9 @@ def _find_claim_header_row(worksheet) -> tuple[int, dict[str, int]]:
     required_headers = {
         _normalize_header_text(header): key for header, key in CLAIM_REQUIRED_HEADERS.items()
     }
+    optional_headers = {
+        _normalize_header_text(header): key for header, key in CLAIM_OPTIONAL_HEADERS.items()
+    }
 
     for row_idx in range(1, min(10, worksheet.max_row) + 1):
         column_map: dict[str, int] = {}
@@ -279,6 +287,10 @@ def _find_claim_header_row(worksheet) -> tuple[int, dict[str, int]]:
             key = required_headers.get(header)
             if key is not None:
                 column_map[key] = col_idx
+                continue
+            optional_key = optional_headers.get(header)
+            if optional_key is not None:
+                column_map[optional_key] = col_idx
         if len(column_map) == len(CLAIM_REQUIRED_HEADERS):
             return row_idx, column_map
 
@@ -287,6 +299,7 @@ def _find_claim_header_row(worksheet) -> tuple[int, dict[str, int]]:
 
 def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
     counts: dict[str, list[float]] = {team_code: [0.0] * 6 for team_code in VALID_TEAM_CODES}
+    kiv_counts: dict[str, list[float]] = {team_code: [0.0, 0.0] for team_code in VALID_TEAM_CODES}
     file_summaries: list[FileClaimSummary] = []
     warnings: list[str] = []
     total_rows = 0
@@ -294,6 +307,7 @@ def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
 
     for lks_path in lks_paths:
         file_counts: dict[str, list[float]] = {team_code: [0.0] * 6 for team_code in VALID_TEAM_CODES}
+        file_kiv_counts: dict[str, list[float]] = {team_code: [0.0, 0.0] for team_code in VALID_TEAM_CODES}
         file_total_rows = 0
         file_counted_rows = 0
         workbook = load_workbook(lks_path, read_only=True, data_only=True)
@@ -309,19 +323,30 @@ def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
                 team_code = _normalize_team_code(worksheet.cell(row=row_idx, column=column_map["labor"]).value or "")
                 phase = _normalize_phase(worksheet.cell(row=row_idx, column=column_map["voltage"]).value)
                 day_type = _normalize_day_type(worksheet.cell(row=row_idx, column=column_map["day_type"]).value)
+                remarks_2 = _as_text(
+                    worksheet.cell(row=row_idx, column=column_map.get("remarks_2", 0)).value
+                ).upper() if column_map.get("remarks_2") else ""
+                is_kiv = "KIV" in remarks_2
 
                 total_rows += 1
                 file_total_rows += 1
-                if team_code is None or phase is None or day_type is None:
+                if team_code is None or phase is None:
                     continue
 
-                column = DAY_TYPE_TO_COLUMN.get((day_type.upper(), phase))
-                if column is None:
-                    continue
+                if is_kiv:
+                    kiv_index = 0 if phase == "PH1" else 1
+                    kiv_counts[team_code][kiv_index] += 1.0
+                    file_kiv_counts[team_code][kiv_index] += 1.0
+                else:
+                    if day_type is None:
+                        continue
+                    column = DAY_TYPE_TO_COLUMN.get((day_type.upper(), phase))
+                    if column is None:
+                        continue
 
-                count_index = COUNT_CELL_ORDER.index(column)
-                counts[team_code][count_index] += 1.0
-                file_counts[team_code][count_index] += 1.0
+                    count_index = COUNT_CELL_ORDER.index(column)
+                    counts[team_code][count_index] += 1.0
+                    file_counts[team_code][count_index] += 1.0
                 counted_rows += 1
                 file_counted_rows += 1
         finally:
@@ -334,6 +359,7 @@ def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
                 counted_rows=file_counted_rows,
                 skipped_rows=file_total_rows - file_counted_rows,
                 counts_by_team={team_code: tuple(values) for team_code, values in file_counts.items()},
+                kiv_counts_by_team={team_code: tuple(values) for team_code, values in file_kiv_counts.items()},
             )
         )
 
@@ -343,6 +369,7 @@ def load_claim_counts(lks_paths: list[Path]) -> ClaimCountSummary:
         counted_rows=counted_rows,
         skipped_rows=total_rows - counted_rows,
         counts_by_team={team_code: tuple(values) for team_code, values in counts.items()},
+        kiv_counts_by_team={team_code: tuple(values) for team_code, values in kiv_counts.items()},
         file_summaries=file_summaries,
         warnings=warnings + (["No valid CLAIM rows were counted from the selected LKS files."] if counted_rows == 0 else []),
     )
@@ -366,6 +393,12 @@ def create_calculation_workbook(
             if team_code:
                 row_by_team[team_code] = row_idx
 
+        kiv_row_by_team: dict[str, int] = {}
+        for row_idx in range(33, 41):
+            team_code = _normalize_team_code(_as_text(worksheet[f"B{row_idx}"].value) or "")
+            if team_code:
+                kiv_row_by_team[team_code] = row_idx
+
         for team_code in VALID_TEAM_CODES:
             row_idx = row_by_team.get(team_code)
             if row_idx is None:
@@ -374,6 +407,16 @@ def create_calculation_workbook(
             values = claim_summary.counts_by_team.get(team_code, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
             for column, value in zip(COUNT_CELL_ORDER, values):
                 worksheet[f"{column}{row_idx}"] = value
+
+            kiv_row_idx = kiv_row_by_team.get(team_code)
+            if kiv_row_idx is not None:
+                kiv_ph1, kiv_ph3 = claim_summary.kiv_counts_by_team.get(team_code, (0.0, 0.0))
+                worksheet[f"C{kiv_row_idx}"] = kiv_ph1
+                worksheet[f"D{kiv_row_idx}"] = kiv_ph3
+                worksheet[f"E{kiv_row_idx}"] = 0
+                worksheet[f"F{kiv_row_idx}"] = 0
+                worksheet[f"G{kiv_row_idx}"] = 0
+                worksheet[f"H{kiv_row_idx}"] = 0
 
         if hasattr(workbook, "calculation") and workbook.calculation is not None:
             workbook.calculation.calcMode = "auto"
@@ -405,10 +448,16 @@ def format_claim_summary_lines(claim_summary: ClaimCountSummary) -> list[str]:
         if file_summary.skipped_rows:
             lines.append(f"  Skipped rows: {file_summary.skipped_rows}")
         lines.extend(_format_team_count_lines(file_summary.counts_by_team))
+        if any(any(values) for values in file_summary.kiv_counts_by_team.values()):
+            lines.append("KIV totals:")
+            lines.extend(_format_kiv_count_lines(file_summary.kiv_counts_by_team))
 
     lines.append("")
     lines.append("Combined team totals:")
     lines.extend(_format_team_count_lines(claim_summary.counts_by_team))
+    if any(any(values) for values in claim_summary.kiv_counts_by_team.values()):
+        lines.append("Combined KIV totals:")
+        lines.extend(_format_kiv_count_lines(claim_summary.kiv_counts_by_team))
     return lines
 
 
@@ -429,6 +478,22 @@ def _format_team_count_lines(
             f"{team_code:<7}  {total:>5}  {int(hb_ph1):>5}  {int(hb_ph3):>5}  "
             f"{int(hm_ph1):>5}  {int(hm_ph3):>5}  {int(cu_ph1):>5}  {int(cu_ph3):>5}"
         )
+    return lines
+
+
+def _format_kiv_count_lines(
+    counts_by_team: dict[str, tuple[float, float]],
+) -> list[str]:
+    lines = [
+        "TEAM     TOTAL  KIV-P1  KIV-P3",
+        "-------  -----  ------  ------",
+    ]
+    for team_code in VALID_TEAM_CODES:
+        kiv_ph1, kiv_ph3 = counts_by_team.get(team_code, (0.0, 0.0))
+        if not kiv_ph1 and not kiv_ph3:
+            continue
+        total = int(kiv_ph1 + kiv_ph3)
+        lines.append(f"{team_code:<7}  {total:>5}  {int(kiv_ph1):>6}  {int(kiv_ph3):>6}")
     return lines
 
 
