@@ -291,7 +291,8 @@ def _find_claim_header_row(worksheet) -> tuple[int, dict[str, int]]:
             optional_key = optional_headers.get(header)
             if optional_key is not None:
                 column_map[optional_key] = col_idx
-        if len(column_map) == len(CLAIM_REQUIRED_HEADERS):
+        required_keys = set(CLAIM_REQUIRED_HEADERS.values())
+        if required_keys.issubset(column_map.keys()):
             return row_idx, column_map
 
     raise ValueError("Could not find the required CLAIM headers in the selected LKS workbook.")
