@@ -7,6 +7,7 @@ from pathlib import Path
 
 import xlwings as xw
 from openpyxl import load_workbook
+from shutil import copy2
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,10 @@ TEAM_CODE_SET = set(VALID_TEAM_CODES)
 COUNT_CELL_ORDER = ("C", "D", "E", "F", "G", "H")
 COUNT_TEMPLATE_ROWS = (14, 15, 16, 17, 18, 19)
 COUNT_TEMPLATE_RATE_CELLS = ("E14", "E15", "E16", "E17", "E18", "E19")
+KIV_TEMPLATE_ROWS = (21, 22)
+KIV_TEMPLATE_RATE_CELLS = ("E21", "E22")
+KIV_TEMPLATE_UNIT_CELLS = ("F21", "F22")
+KIV_TEMPLATE_AMOUNT_CELLS = ("G21", "G22")
 SUPERVISOR_LABEL_CELL = "D14"
 SUPERVISOR_AMOUNT_CELL = "G14"
 
@@ -63,6 +68,15 @@ ROLE_RATES = {
     "helper": (12.0, 14.5, 15.5, 16.5, 17.0, 18.5),
     "installer": (15.0, 17.5, 19.5, 20.5, 22.0, 23.5),
 }
+KIV_ROLE_RATES = {
+    "helper": (15.0, 18.0),
+    "installer": (18.0, 20.0),
+}
+POSITION_LABELS = {
+    "helper": "HELPER",
+    "installer": "WIREMAN PW4",
+    "supervisor": "SUPERVISOR",
+}
 
 
 @dataclass(frozen=True)
@@ -80,6 +94,7 @@ class WorkerIdentity:
 class TeamCalculation:
     team_code: str
     counts: tuple[float, float, float, float, float, float]
+    kiv_counts: tuple[float, float]
     helper_base_gross: float
     installer_base_gross: float
     helper_final_gross: float
@@ -105,6 +120,7 @@ class PayslipEntry:
     salary_month: str
     payment_date: date
     counts: tuple[float, float, float, float, float, float]
+    kiv_counts: tuple[float, float]
     gross: float
     net: float
     deduction_total: float
@@ -529,6 +545,16 @@ def load_calculation(calc_path: Path) -> tuple[list[TeamCalculation], Supervisor
                 _as_float(worksheet[f"{column}{row_idx}"].value) for column in COUNT_CELL_ORDER
             )
 
+        kiv_counts_by_team: dict[str, tuple[float, float]] = {}
+        for row_idx in range(33, 41):
+            team_code = _as_text(worksheet[f"B{row_idx}"].value)
+            if not team_code:
+                continue
+            kiv_counts_by_team[team_code] = (
+                _as_float(worksheet[f"C{row_idx}"].value),
+                _as_float(worksheet[f"D{row_idx}"].value),
+            )
+
         base_gross_by_team: dict[str, tuple[float, float]] = {}
         for row_idx in range(MAIN_GROSS_ROW_START, MAIN_GROSS_ROW_END + 1):
             team_code = _as_text(worksheet[f"B{row_idx}"].value)
@@ -552,6 +578,7 @@ def load_calculation(calc_path: Path) -> tuple[list[TeamCalculation], Supervisor
                 TeamCalculation(
                     team_code=team_code,
                     counts=counts,
+                    kiv_counts=kiv_counts_by_team.get(team_code, (0.0, 0.0)),
                     helper_base_gross=helper_base_gross,
                     installer_base_gross=installer_base_gross,
                     helper_final_gross=_as_float(worksheet[f"J{row_idx}"].value),
@@ -604,6 +631,7 @@ def build_entries(
                     salary_month=salary_month,
                     payment_date=payment_date,
                     counts=calc.counts,
+                    kiv_counts=calc.kiv_counts,
                     gross=calc.helper_final_gross,
                     net=calc.helper_final_net,
                     deduction_total=FIXED_DEDUCTION_TOTAL,
@@ -626,6 +654,7 @@ def build_entries(
                     salary_month=salary_month,
                     payment_date=payment_date,
                     counts=calc.counts,
+                    kiv_counts=calc.kiv_counts,
                     gross=calc.installer_final_gross,
                     net=calc.installer_final_net,
                     deduction_total=FIXED_DEDUCTION_TOTAL,
@@ -648,6 +677,7 @@ def build_entries(
                 salary_month=salary_month,
                 payment_date=payment_date,
                 counts=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                kiv_counts=(0.0, 0.0),
                 gross=supervisor_calc.gross,
                 net=supervisor_calc.net,
                 deduction_total=FIXED_DEDUCTION_TOTAL,
@@ -664,7 +694,7 @@ def _set_header_fields(worksheet, entry: PayslipEntry) -> None:
     worksheet["J9"] = entry.salary_month
     worksheet["D10"] = entry.ic_number
     worksheet["J10"] = entry.payment_date
-    worksheet["D11"] = entry.position
+    worksheet["D11"] = POSITION_LABELS.get(entry.role, entry.position)
 
 
 def _clear_range(worksheet, addresses: list[str]) -> None:
@@ -673,38 +703,68 @@ def _clear_range(worksheet, addresses: list[str]) -> None:
 
 
 def populate_payslip_template(entry: PayslipEntry, output_path: Path) -> None:
-    workbook = load_workbook(entry.template_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    copy2(entry.template_path, output_path)
+
+    app: xw.App | None = None
+    book = None
     try:
-        worksheet = workbook[workbook.sheetnames[0]]
-        _set_header_fields(worksheet, entry)
+        app = xw.App(visible=False, add_book=False)
+        app.display_alerts = False
+        app.screen_updating = False
+        book = app.books.open(str(output_path), update_links=False, read_only=False)
+        sheet = book.sheets[0]
+
+        sheet["D9"].value = entry.name
+        sheet["J9"].value = entry.salary_month
+        sheet["D10"].value = entry.ic_number
+        sheet["J10"].value = entry.payment_date
+        sheet["D11"].value = POSITION_LABELS.get(entry.role, entry.position)
 
         if entry.role in {"helper", "installer"}:
             for cell, rate in zip(COUNT_TEMPLATE_RATE_CELLS, ROLE_RATES[entry.role]):
-                worksheet[cell] = rate
+                sheet[cell].value = rate
             for row, value in zip(COUNT_TEMPLATE_ROWS, entry.counts):
-                worksheet[f"F{row}"] = value
+                sheet[f"F{row}"].value = value
 
-            worksheet["D23"] = "TASK FORCE / KIV ADD-ON" if abs(entry.task_force_add_on) > 0.0001 else ""
-            worksheet["G23"] = entry.task_force_add_on if abs(entry.task_force_add_on) > 0.0001 else None
+            kiv_rates = KIV_ROLE_RATES[entry.role]
+            kiv_counts = entry.kiv_counts
+            for cell in ("D20", "E20", "F20", "G20"):
+                sheet[cell].value = None
+            sheet["D21"].value = "TASK FORCE / KIV (PH1)"
+            sheet["D22"].value = "TASK FORCE / KIV (PH3)"
+            for cell, rate in zip(KIV_TEMPLATE_RATE_CELLS, kiv_rates):
+                sheet[cell].value = rate
+            for cell, value in zip(KIV_TEMPLATE_UNIT_CELLS, kiv_counts):
+                sheet[cell].value = value
+            for cell, rate_cell, unit_cell in zip(KIV_TEMPLATE_AMOUNT_CELLS, KIV_TEMPLATE_RATE_CELLS, KIV_TEMPLATE_UNIT_CELLS):
+                sheet[cell].formula = f"={rate_cell}*{unit_cell}"
 
-            _clear_range(worksheet, ["J14", "J15", "J16", "J17"])
-            worksheet["J14"] = entry.deduction_total
+            sheet["D23"].value = ""
+            sheet["G23"].value = None
+            for cell in ("J14", "J15", "J16", "J17"):
+                sheet[cell].value = None
+            sheet["J14"].value = entry.deduction_total
         else:
-            worksheet[SUPERVISOR_LABEL_CELL] = "ALLOWANCE"
-            worksheet[SUPERVISOR_AMOUNT_CELL] = entry.gross
-            _clear_range(worksheet, ["E14", "E15", "E16", "E17", "E18", "E19", "F14", "F15", "F16", "F17", "F18", "F19"])
-            _clear_range(worksheet, ["J14", "J15", "J16", "J17"])
-            worksheet["J14"] = entry.deduction_total
+            sheet[SUPERVISOR_LABEL_CELL].value = "ALLOWANCE"
+            sheet[SUPERVISOR_AMOUNT_CELL].value = entry.gross
+            for cell in (
+                "E14", "E15", "E16", "E17", "E18", "E19",
+                "F14", "F15", "F16", "F17", "F18", "F19",
+                "D20", "D21", "D22", "E20", "E21", "E22", "F20", "F21", "F22", "G20", "G21", "G22", "D23", "G23",
+            ):
+                sheet[cell].value = None
+            for cell in ("J14", "J15", "J16", "J17"):
+                sheet[cell].value = None
+            sheet["J14"].value = entry.deduction_total
 
-        if hasattr(workbook, "calculation") and workbook.calculation is not None:
-            workbook.calculation.calcMode = "auto"
-            workbook.calculation.fullCalcOnLoad = True
-            workbook.calculation.forceFullCalc = True
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        workbook.save(output_path)
+        app.api.CalculateFull()
+        book.save()
     finally:
-        workbook.close()
+        if book is not None:
+            book.close()
+        if app is not None:
+            app.quit()
 
 
 def export_pdfs(generated: list[GeneratedPayslip]) -> list[str]:
