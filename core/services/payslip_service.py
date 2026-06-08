@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -8,6 +9,11 @@ from pathlib import Path
 import xlwings as xw
 from openpyxl import load_workbook
 from shutil import copy2
+
+try:
+    from win32com.client import gencache
+except Exception:  # pragma: no cover - only used on Windows with pywin32
+    gencache = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -246,6 +252,48 @@ def _build_output_root(output_dir: Path, payment_date: date, salary_month: str) 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     month_slug = _format_month_slug(payment_date, salary_month)
     return output_dir / month_slug / timestamp
+
+
+def _create_excel_app() -> xw.App:
+    try:
+        return _start_excel_app()
+    except Exception as exc:
+        if not _is_gen_py_cache_error(exc):
+            raise
+        _clear_win32com_gen_py_cache()
+        return _start_excel_app()
+
+
+def _start_excel_app() -> xw.App:
+    app = xw.App(visible=False, add_book=False)
+    app.display_alerts = False
+    app.screen_updating = False
+    return app
+
+
+def _is_gen_py_cache_error(exc: Exception) -> bool:
+    text = str(exc)
+    return "win32com.gen_py" in text and "CLSIDToPackageMap" in text
+
+
+def _clear_win32com_gen_py_cache() -> None:
+    if gencache is None:
+        return
+
+    cache_dir = None
+    try:
+        cache_dir = Path(gencache.GetGeneratePath())
+    except Exception:
+        return
+
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+    try:
+        gencache.is_readonly = False
+        gencache.Rebuild()
+    except Exception:
+        pass
 
 
 def load_worker_master(master_path: Path) -> tuple[dict[str, dict[str, WorkerIdentity]], WorkerIdentity | None]:
@@ -522,9 +570,7 @@ def recalculate_workbook(workbook_path: Path) -> None:
     app: xw.App | None = None
     book = None
     try:
-        app = xw.App(visible=False, add_book=False)
-        app.display_alerts = False
-        app.screen_updating = False
+        app = _create_excel_app()
         book = app.books.open(str(workbook_path), update_links=False, read_only=False)
         app.api.CalculateFull()
         book.save()
@@ -725,9 +771,7 @@ def populate_payslip_template(entry: PayslipEntry, output_path: Path) -> None:
     app: xw.App | None = None
     book = None
     try:
-        app = xw.App(visible=False, add_book=False)
-        app.display_alerts = False
-        app.screen_updating = False
+        app = _create_excel_app()
         book = app.books.open(str(output_path), update_links=False, read_only=False)
         sheet = book.sheets[0]
 
@@ -782,9 +826,7 @@ def export_pdfs(generated: list[GeneratedPayslip]) -> list[str]:
     failures: list[str] = []
     app: xw.App | None = None
     try:
-        app = xw.App(visible=False, add_book=False)
-        app.display_alerts = False
-        app.screen_updating = False
+        app = _create_excel_app()
 
         for item in generated:
             book = None
