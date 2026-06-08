@@ -68,9 +68,11 @@ ROLE_RATES = {
     "helper": (12.0, 14.5, 15.5, 16.5, 17.0, 18.5),
     "installer": (15.0, 17.5, 19.5, 20.5, 22.0, 23.5),
 }
+SUPERVISOR_RATES = (3.0, 3.0, 4.0, 4.0, 4.0, 4.0)
 KIV_ROLE_RATES = {
     "helper": (15.0, 18.0),
     "installer": (18.0, 20.0),
+    "supervisor": (4.0, 4.0),
 }
 POSITION_LABELS = {
     "helper": "HELPER",
@@ -105,8 +107,10 @@ class TeamCalculation:
 
 @dataclass(frozen=True)
 class SupervisorCalculation:
+    counts: tuple[float, float, float, float, float, float]
     gross: float
     net: float
+    kiv_counts: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -589,8 +593,20 @@ def load_calculation(calc_path: Path) -> tuple[list[TeamCalculation], Supervisor
             )
 
         supervisor = SupervisorCalculation(
+            counts=(
+                _as_float(worksheet["C13"].value),
+                _as_float(worksheet["D13"].value),
+                _as_float(worksheet["E13"].value),
+                _as_float(worksheet["F13"].value),
+                _as_float(worksheet["G13"].value),
+                _as_float(worksheet["H13"].value),
+            ),
             gross=_as_float(worksheet[f"J{SUPERVISOR_ROW}"].value),
             net=_as_float(worksheet[f"P{SUPERVISOR_ROW}"].value),
+            kiv_counts=(
+                sum(values[0] for values in kiv_counts_by_team.values()),
+                sum(values[1] for values in kiv_counts_by_team.values()),
+            ),
         )
         return team_calculations, supervisor
     finally:
@@ -676,8 +692,8 @@ def build_entries(
                 position=supervisor.position,
                 salary_month=salary_month,
                 payment_date=payment_date,
-                counts=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-                kiv_counts=(0.0, 0.0),
+                counts=supervisor_calc.counts,
+                kiv_counts=supervisor_calc.kiv_counts,
                 gross=supervisor_calc.gross,
                 net=supervisor_calc.net,
                 deduction_total=FIXED_DEDUCTION_TOTAL,
@@ -721,8 +737,9 @@ def populate_payslip_template(entry: PayslipEntry, output_path: Path) -> None:
         sheet["J10"].value = entry.payment_date
         sheet["D11"].value = POSITION_LABELS.get(entry.role, entry.position)
 
-        if entry.role in {"helper", "installer"}:
-            for cell, rate in zip(COUNT_TEMPLATE_RATE_CELLS, ROLE_RATES[entry.role]):
+        if entry.role in {"helper", "installer", "supervisor"}:
+            normal_rates = ROLE_RATES[entry.role] if entry.role in ROLE_RATES else SUPERVISOR_RATES
+            for cell, rate in zip(COUNT_TEMPLATE_RATE_CELLS, normal_rates):
                 sheet[cell].value = rate
             for row, value in zip(COUNT_TEMPLATE_ROWS, entry.counts):
                 sheet[f"F{row}"].value = value
@@ -738,22 +755,13 @@ def populate_payslip_template(entry: PayslipEntry, output_path: Path) -> None:
             for cell, value in zip(KIV_TEMPLATE_UNIT_CELLS, kiv_counts):
                 sheet[cell].value = value
             for cell, rate_cell, unit_cell in zip(KIV_TEMPLATE_AMOUNT_CELLS, KIV_TEMPLATE_RATE_CELLS, KIV_TEMPLATE_UNIT_CELLS):
-                sheet[cell].formula = f"={rate_cell}*{unit_cell}"
+                sheet[cell].value = f"={rate_cell}*{unit_cell}"
 
             sheet["D23"].value = ""
             sheet["G23"].value = None
             for cell in ("J14", "J15", "J16", "J17"):
                 sheet[cell].value = None
             sheet["J14"].value = entry.deduction_total
-        else:
-            sheet[SUPERVISOR_LABEL_CELL].value = "ALLOWANCE"
-            sheet[SUPERVISOR_AMOUNT_CELL].value = entry.gross
-            for cell in (
-                "E14", "E15", "E16", "E17", "E18", "E19",
-                "F14", "F15", "F16", "F17", "F18", "F19",
-                "D20", "D21", "D22", "E20", "E21", "E22", "F20", "F21", "F22", "G20", "G21", "G22", "D23", "G23",
-            ):
-                sheet[cell].value = None
             for cell in ("J14", "J15", "J16", "J17"):
                 sheet[cell].value = None
             sheet["J14"].value = entry.deduction_total
