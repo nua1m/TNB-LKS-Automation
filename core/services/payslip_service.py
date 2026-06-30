@@ -781,9 +781,8 @@ def populate_payslip_template(entry: PayslipEntry, output_path: Path) -> None:
         sheet["J10"].value = entry.payment_date
         sheet["D11"].value = POSITION_LABELS.get(entry.role, entry.position)
 
-        if entry.role in {"helper", "installer", "supervisor"}:
-            normal_rates = ROLE_RATES[entry.role] if entry.role in ROLE_RATES else SUPERVISOR_RATES
-            for cell, rate in zip(COUNT_TEMPLATE_RATE_CELLS, normal_rates):
+        if entry.role in {"helper", "installer"}:
+            for cell, rate in zip(COUNT_TEMPLATE_RATE_CELLS, ROLE_RATES[entry.role]):
                 sheet[cell].value = rate
             for row, value in zip(COUNT_TEMPLATE_ROWS, entry.counts):
                 sheet[f"F{row}"].value = value
@@ -801,14 +800,35 @@ def populate_payslip_template(entry: PayslipEntry, output_path: Path) -> None:
             for cell, rate_cell, unit_cell in zip(KIV_TEMPLATE_AMOUNT_CELLS, KIV_TEMPLATE_RATE_CELLS, KIV_TEMPLATE_UNIT_CELLS):
                 sheet[cell].value = f"={rate_cell}*{unit_cell}"
 
-            sheet["D23"].value = ""
-            sheet["G23"].value = None
-            for cell in ("J14", "J15", "J16", "J17"):
-                sheet[cell].value = None
-            sheet["J14"].value = entry.deduction_total
-            for cell in ("J14", "J15", "J16", "J17"):
-                sheet[cell].value = None
-            sheet["J14"].value = entry.deduction_total
+        elif entry.role == "supervisor":
+            hb_ph1, hb_ph3, hm_ph1, hm_ph3, cu_ph1, cu_ph3 = entry.counts
+            kiv_ph1, kiv_ph3 = entry.kiv_counts
+
+            supervisor_rows = [
+                (14, "HARI BIASA (PH1 & PH3)", 3.0, hb_ph1 + hb_ph3),
+                (16, "HUJUNG MINGGU (PH1 & PH3)", 4.0, hm_ph1 + hm_ph3),
+                (18, "CUTI UMUM (PH1 & PH3)", 4.0, cu_ph1 + cu_ph3),
+                (22, "TASK FORCE / KIV (PH1 & PH3)", 4.0, kiv_ph1 + kiv_ph3),
+            ]
+
+            for row in (14, 15, 16, 17, 18, 19, 21, 22, 23):
+                for cell in (f"C{row}", f"D{row}", f"E{row}", f"F{row}", f"G{row}"):
+                    sheet[cell].value = None
+
+            sheet["C14"].value = "ALLOWANCE"
+            for row, label, rate, units in supervisor_rows:
+                sheet[f"D{row}"].value = label
+                sheet[f"E{row}"].value = rate
+                sheet[f"F{row}"].value = units
+                sheet[f"G{row}"].value = f"=E{row}*F{row}"
+                sheet.range(f"G{row}").api.Font.Bold = False
+                sheet.range(f"G{row}").number_format = "0.00"
+
+        for cell in ("J14", "J15", "J16", "J17"):
+            sheet[cell].value = None
+        sheet["J14"].value = entry.deduction_total
+        sheet["D23"].value = ""
+        sheet["G23"].value = None
 
         app.api.CalculateFull()
         book.save()
