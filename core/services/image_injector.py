@@ -6,10 +6,11 @@ from config import (
 
 class ImageInjector:
     @staticmethod
-    def detect_type(url: str) -> str | None:
-        if not url: return None
-        u = url.lower()
-        filename = u.split("/")[-1] # Focus on filename
+    def detect_type(*texts: str) -> str | None:
+        combined = " ".join(str(text or "") for text in texts).lower()
+        if not combined:
+            return None
+        filename = combined.split("/")[-1]
         
         # OLD READ
         if any(x in filename for x in ["old_read", "oldread", "old_red", "old_rea"]):
@@ -26,18 +27,34 @@ class ImageInjector:
             x in filename
             for x in [
                 "new_meter",
+                "new meter",
                 "newmeter",
                 "nee_meter",
+                "nee meter",
                 "new_metwr",
+                "new metwr",
+                "new meer",
                 "new_meer",
                 "mew_meter",
+                "mew meter",
                 "mewmeter",
                 "ew_meter",
+                "ew meter",
                 "ewmeter",
                 "nw_meter",
+                "nw meter",
                 "new_mter",
+                "new mter",
                 "new_metr",
+                "new metr",
+                "new_mete",
+                "new mete",
+                "new_kete",
+                "new_mtr",
+                "new mtr",
                 "newmeterr",
+                "new eter",
+                "new_eter"
             ]
         ):
             return "new"
@@ -49,6 +66,32 @@ class ImageInjector:
         ):
             return "new"
         
+        return None
+
+    @staticmethod
+    def _find_attachment_name_column(columns: list[str], url_header: str) -> str | None:
+        explicit_names = {
+            "ATTACHMENT NAME",
+            "ATTACHMENTS NAME",
+            "FILE NAME",
+            "ATTACHMENT FILENAME",
+            "ATTACHMENT FILE NAME",
+            "DOCUMENT NAME",
+            "IMAGE NAME",
+        }
+        for column in columns:
+            if column in explicit_names:
+                return column
+
+        try:
+            url_idx = columns.index(url_header)
+        except ValueError:
+            return None
+
+        if url_idx > 0:
+            candidate = columns[url_idx - 1]
+            if "NAME" in candidate:
+                return candidate
         return None
 
     @staticmethod
@@ -67,6 +110,7 @@ class ImageInjector:
         target_url = COL_ATTACH_URL.upper()
         
         rename_map = {}
+        attachment_name_col = ImageInjector._find_attachment_name_column(df.columns.tolist(), target_url)
         for c in df.columns:
             if c in ["3MS SO NO.", "3MS SO NO", "SO NUMBER", target_so]:
                 rename_map[c] = COL_3MS_SO
@@ -92,6 +136,7 @@ class ImageInjector:
             
             so = clean_so(row[COL_3MS_SO])
             url = str(row[COL_ATTACH_URL]).strip()
+            attachment_name = str(row.get(attachment_name_col, "")).strip() if attachment_name_col else ""
             if not so or not url: continue
 
             if so not in url_map:
@@ -100,7 +145,7 @@ class ImageInjector:
             if url_map[so]["first"] is None:
                 url_map[so]["first"] = url
             
-            t = ImageInjector.detect_type(url)
+            t = ImageInjector.detect_type(url, attachment_name)
             if t and url_map[so][t] is None:
                 url_map[so][t] = url
         return url_map
