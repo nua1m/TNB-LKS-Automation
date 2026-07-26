@@ -90,8 +90,10 @@ The app currently maps the following Business Areas from `Site ID`:
 | --- | --- |
 | `6340` | Johor Bahru |
 | `6342` | Kulai Jaya |
+| `6345` | Pasir Gudang |
 | `6346` | Johor Jaya |
 | `6410` | Kota Bharu |
+| `6333` | Pontian |
 
 ## Current Business Analysis
 
