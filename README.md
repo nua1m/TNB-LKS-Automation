@@ -101,7 +101,7 @@ This section captures the current business analysis assumptions and scope.
 
 ### Current Users
 
-- primary users are internal operators: you and your colleague
+- primary users are internal operators: me and my colleague
 - users are assumed to be non-technical and should not need Git or terminal usage
 
 ### Current Problem Being Solved
