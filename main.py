@@ -155,6 +155,7 @@ def run_process(
     start_claim = get_next_empty(handler.ws_claim)
     start_attach = get_next_empty(handler.ws_attach)
     ClaimService.write_data(handler, new_rows, start_claim, start_attach)
+    new_so_set = {clean_so(row["Service Order"]) for row in new_rows if clean_so(row["Service Order"])}
 
     step("Checking image links", "Checking image links")
     _emit(log_fn, f"{DIM}  Reviewing OLD meter, CARD, and NEW meter image links.{RESET}")
@@ -170,9 +171,22 @@ def run_process(
         if show_cli_summary:
             step_progress("IMAGES", img_counter, total_imgs, extra=message, spinner_i=img_counter)
 
-    ImageInjector.run(handler, source_path, progress_cb=img_progress, sheet_name=source_sheet)
+    url_map = ImageInjector.run(handler, source_path, progress_cb=img_progress, sheet_name=source_sheet)
     if show_cli_summary:
         _emit(log_fn, "")
+
+    step("Checking automatic diskon dates", "Checking diskon dates")
+    diskon_report = ImageInjector.apply_diskon_checks(handler, url_map, target_sos=new_so_set)
+    if diskon_report["diskon_count"]:
+        _emit(log_fn, f"{DIM}  - Diskon found        : {RESET}{GREEN}{diskon_report['diskon_count']}{RESET}")
+        _emit(log_fn, f"{DIM}  - Diskon by date:{RESET}")
+        for diskon_date, diskon_count in diskon_report["diskon_by_date"].items():
+            _emit(log_fn, f"{DIM}      {diskon_date}: {RESET}{GREEN}{diskon_count}{RESET}")
+    else:
+        _emit(log_fn, f"{DIM}  - Diskon found        : {RESET}{GREEN}0{RESET}")
+
+    if diskon_report["review_rows"]:
+        _emit(log_fn, f"{DIM}  - Diskon review rows  : {RESET}{YELLOW}{len(diskon_report['review_rows'])}{RESET}")
 
     step("Reviewing rows that need attention", "Reviewing rows that need attention")
 
@@ -188,6 +202,17 @@ def run_process(
     else:
         _emit(log_fn, f"{GREEN}All SOs have complete images.{RESET}")
 
+    if diskon_report["review_rows"]:
+        _emit(log_fn, f"{YELLOW}Rows needing review because automatic diskon check was inconclusive:{RESET}")
+        max_show = 10
+        for index, (so, reason) in enumerate(diskon_report["review_rows"].items()):
+            if index < max_show:
+                _emit(log_fn, f"  - SO {so} -> {reason}")
+        if len(diskon_report["review_rows"]) > max_show:
+            _emit(log_fn, f"  ... and {len(diskon_report['review_rows']) - max_show} more.")
+
+    QualityControl.mark_review(handler, diskon_report["review_rows"])
+    QualityControl.mark_diskon(handler, diskon_report["diskon_rows"])
     QualityControl.mark_defective(handler, missing)
     QualityControl.format_all(handler)
 
@@ -232,7 +257,8 @@ def run_process(
         "Duplicate SOs skipped": stats["duplicates_skipped"],
         "Rows skipped for TRAS": stats["tras_removed"],
         "SOs with duplicates": stats.get("duplicate_groups", 0),
-        "Rows needing review": len(missing),
+        "Diskon found": diskon_report["diskon_count"],
+        "Rows needing review": len(set(missing) | set(diskon_report["review_rows"])),
         "Missing OLD meter": counts["old"],
         "Missing CARD": counts["card"],
         "Missing NEW meter": counts["new"],
@@ -257,6 +283,7 @@ def run_process(
         "elapsed": elapsed,
         "summary": summary,
         "tras_by_date": stats.get("tras_by_date", {}),
+        "diskon_by_date": diskon_report["diskon_by_date"],
         "duplicates_skipped": stats["duplicates_skipped"],
         "duplicate_groups": stats.get("duplicate_groups", 0),
         "duplicate_counts": stats.get("duplicate_counts", {}),

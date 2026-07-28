@@ -1,10 +1,40 @@
+import re
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 from core.so_utils import clean_so
+from core.services.date_engine import DateEngine
 from config import (
     DATA_START_ROW, SERVICE_ORDER_COL_IDX, COL_3MS_SO, COL_ATTACH_URL
 )
 
+MALAYSIA_TZ = timezone(timedelta(hours=8))
+
 class ImageInjector:
+    @staticmethod
+    def _unique_urls(urls):
+        return list(dict.fromkeys(url for url in urls if url))
+
+    @staticmethod
+    def choose_diskon_url(img_info):
+        old_candidates = ImageInjector._unique_urls(img_info.get("old_candidates", []))
+        if old_candidates:
+            if len(old_candidates) > 1:
+                return None, "Multiple OLD images found"
+            return old_candidates[0], None
+
+        fallback_candidates = ImageInjector._unique_urls(
+            [
+                img_info.get("new"),
+                img_info.get("card"),
+                img_info.get("first"),
+            ]
+        )
+        if not fallback_candidates:
+            return None, "No image timestamp found"
+        return fallback_candidates[0], None
+
     @staticmethod
     def detect_type(*texts: str) -> str | None:
         combined = " ".join(str(text or "") for text in texts).lower()
@@ -99,7 +129,7 @@ class ImageInjector:
 
     @staticmethod
     def build_url_map(data_path, sheet_name=None):
-        """Reads raw data and maps SO -> {old, card, new} URLs."""
+        """Reads raw data and maps SO -> image URLs plus old-image timestamp metadata."""
         from config import DATA_SHEET_NAME 
         target_sheet = sheet_name if sheet_name else (DATA_SHEET_NAME if DATA_SHEET_NAME else 0)
 
@@ -143,15 +173,51 @@ class ImageInjector:
             if not so or not url: continue
 
             if so not in url_map:
-                url_map[so] = {"old": None, "card": None, "new": None, "first": None}
+                url_map[so] = {
+                    "old": None,
+                    "card": None,
+                    "new": None,
+                    "first": None,
+                    "old_candidates": [],
+                }
             
             if url_map[so]["first"] is None:
                 url_map[so]["first"] = url
             
             t = ImageInjector.detect_type(url, attachment_name)
+            if t == "old":
+                url_map[so]["old_candidates"].append(url)
             if t and url_map[so][t] is None:
                 url_map[so][t] = url
         return url_map
+
+    @staticmethod
+    def extract_url_timestamp(url: str):
+        if not url:
+            return None
+        match = re.search(r"(\d{10,17})(?=\.[A-Za-z0-9]+(?:$|\?))", str(url))
+        if not match:
+            return None
+
+        raw_value = match.group(1)
+        try:
+            timestamp_value = int(raw_value)
+        except ValueError:
+            return None
+
+        if len(raw_value) >= 13:
+            timestamp_value = timestamp_value / 1000
+
+        try:
+            return datetime.fromtimestamp(timestamp_value, tz=timezone.utc).astimezone(MALAYSIA_TZ)
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    @staticmethod
+    def format_diskon_date(date_value):
+        if not date_value:
+            return ""
+        return f"{date_value.day} {date_value.strftime('%B').upper()}"
 
     @staticmethod
     def img_formula(url: str) -> str | None:
@@ -168,7 +234,7 @@ class ImageInjector:
 
     @staticmethod
     def run(handler, data_path, progress_cb=None, sheet_name=None):
-        """Injects image formulas into Attachment sheet."""
+        """Injects image formulas into Attachment sheet and returns image metadata."""
         data_path = str(data_path) # pandas needs string
         url_map = ImageInjector.build_url_map(data_path, sheet_name=sheet_name)
         
@@ -194,3 +260,85 @@ class ImageInjector:
 
             if progress_cb:
                 progress_cb(f"Processing SO {so} ({idx}/{total})")
+
+        return url_map
+
+    @staticmethod
+    def apply_diskon_checks(handler, url_map, target_sos=None):
+        ws_claim = handler.ws_claim
+        ws_attach = handler.ws_attach
+        target_so_set = set(target_sos or [])
+
+        claim_rows = {}
+        for row_idx in range(DATA_START_ROW, ws_claim.max_row + 1):
+            so = clean_so(ws_claim.cell(row_idx, SERVICE_ORDER_COL_IDX).value)
+            if so:
+                claim_rows[so] = row_idx
+
+        review_rows = {}
+        diskon_by_date = Counter()
+        diskon_count = 0
+        diskon_rows = {}
+
+        for attach_row in range(DATA_START_ROW, ws_attach.max_row + 1):
+            so = clean_so(ws_attach.cell(attach_row, SERVICE_ORDER_COL_IDX).value)
+            if not so:
+                continue
+            if target_so_set and so not in target_so_set:
+                continue
+
+            claim_row = claim_rows.get(so)
+            if not claim_row:
+                continue
+
+            attach_date_cell = ws_attach.cell(attach_row, 8)
+            claim_remark_cell = ws_claim.cell(claim_row, 17)
+            claim_review_cell = ws_claim.cell(claim_row, 18)
+            attach_date_cell.value = ""
+            claim_remark_cell.value = ""
+            claim_review_cell.value = ""
+
+            if so not in url_map:
+                continue
+            img_info = url_map.get(so, {})
+
+            review_reason = None
+
+            chosen_url, review_reason = ImageInjector.choose_diskon_url(img_info)
+            if chosen_url and not review_reason:
+                chosen_datetime = ImageInjector.extract_url_timestamp(chosen_url)
+                if not chosen_datetime:
+                    review_reason = "Selected image has no timestamp"
+                else:
+                    chosen_date = chosen_datetime.date()
+                    claim_datetime = ws_claim.cell(claim_row, 9).value
+                    if isinstance(claim_datetime, datetime):
+                        claim_date = claim_datetime.date()
+                    else:
+                        claim_date = DateEngine.parse_date(claim_datetime)
+
+                    if not claim_date:
+                        review_reason = "Missing CLAIM status date"
+                    elif chosen_date != claim_date:
+                        formatted_date = ImageInjector.format_diskon_date(chosen_date)
+                        attach_date_cell.value = formatted_date
+                        claim_remark_cell.value = f"TECO LEWAT SEBAB DISKON ({formatted_date})"
+                        diskon_by_date[formatted_date] += 1
+                        diskon_count += 1
+                        diskon_rows[so] = formatted_date
+
+            if review_reason:
+                review_rows[so] = review_reason
+                claim_review_cell.value = review_reason
+
+        return {
+            "diskon_count": diskon_count,
+            "diskon_by_date": dict(
+                sorted(
+                    diskon_by_date.items(),
+                    key=lambda item: datetime.strptime(item[0], "%d %B").replace(year=2000),
+                )
+            ),
+            "diskon_rows": diskon_rows,
+            "review_rows": review_rows,
+        }
