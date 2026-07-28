@@ -117,13 +117,6 @@ class ClaimService:
             # Parse date using DateEngine
             # We want to keep the full datetime object for writing to Excel later
             date_obj = DateEngine.parse_datetime(raw_status)
-            status_str = str(raw_status) # Keep original just in case, or for debug
-            
-            # If we successfully parsed a datetime, we can format it for display in logs if needed
-            # but for the "Status Date" field in the row, we should store the object.
-            
-            # date_obj is now a datetime object (or None)
-            
             if not date_obj and str(raw_status).strip():
                 stats["invalid_dates"] += 1
             if not str(row0.get(COL_ADDRESS, "") or "").strip():
@@ -146,11 +139,6 @@ class ClaimService:
         for i, g in enumerate(so_groups, 1):
             r0 = g["row0"]
             
-            # --- DATE LOGIC CORE ---
-            # Currently we don't have OCR dates in the builder flow, so ocr_date=None
-            # But the logic will still calculate Hari/TaskForce based on Status Date
-            logic = DateEngine.calculate(g["status_val"], ocr_date_str=None)
-            
             rows.append({
                 "Qty": i,
                 "Service Order": g["so"],
@@ -166,12 +154,11 @@ class ClaimService:
                 "Old Device No": r0.get(COL_OLD_METER, "") or "",
                 "New Device No": r0.get(COL_NEW_METER, "") or "",
                 "Comm Module No": r0.get(COL_NEW_COMM, "") or "",
-                
-                # Derived Fields
-                "Hari Field": logic["hari"],
+
+                "Hari Field": DateEngine.get_hari_field(g["status_val"]),
                 "Jenis Kerja": "KERJA BIASA",
-                "Remarks 1": logic["remarks_1"],
-                "Remarks 2": logic["remarks_2"],
+                "Remarks 1": "",
+                "Remarks 2": "",
             })
         
         formatted_tras_by_date: dict[str, int] = {}

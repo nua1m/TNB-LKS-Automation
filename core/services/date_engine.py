@@ -2,7 +2,6 @@ from datetime import datetime
 
 class DateEngine:
     @staticmethod
-    @staticmethod
     def parse_datetime(date_str):
         """Attempts to parse a date string into a datetime object."""
         if not date_str: return None
@@ -28,7 +27,7 @@ class DateEngine:
                 except ValueError:
                     pass
 
-        # Handle "4 Dec 2025" (OCR format)
+        # Handle "4 Dec 2025" style dates
         try:
              return datetime.strptime(s, "%d %b %Y")
         except ValueError:
@@ -55,45 +54,9 @@ class DateEngine:
         return None
 
     @staticmethod
-    def calculate(status_date_str, ocr_date_str=None):
-        """
-        Applies Business Logic:
-        1. Effective Date = OCR if present, else Status.
-        2. Diskon = (OCR is present AND OCR != Status).
-        3. Hari = "Hujung Minggu" if Effective is Sunday.
-        4. Remarks 2 is currently disabled.
-        5. Remarks 1 = "TECO LEWAT..." if Diskon.
-        """
+    def get_hari_field(status_date_str):
+        """Returns the day-type label from the CLAIM status date."""
         status_date = DateEngine.parse_date(status_date_str)
-        ocr_date = DateEngine.parse_date(ocr_date_str)
-
-        # Default to Status Date
-        effective_date = status_date
-        is_diskon = False
-
-        # Apply OCR override if valid
-        if ocr_date:
-            if status_date != ocr_date:
-                effective_date = ocr_date
-                is_diskon = True
-        
-        # Derived Fields
-        hari_field = "Hari Biasa"
-        remarks_1 = ""
-        remarks_2 = ""
-
-        if effective_date:
-            # Sunday Rule
-            if effective_date.weekday() == 6:
-                hari_field = "Hujung Minggu"
-
-        if is_diskon:
-            remarks_1 = f"TECO LEWAT SEBAB DISKON ({effective_date.strftime('%d %b %Y')})"
-
-        return {
-            "effective_date": effective_date,
-            "is_diskon": is_diskon,
-            "hari": hari_field,
-            "remarks_1": remarks_1,
-            "remarks_2": remarks_2
-        }
+        if status_date and status_date.weekday() == 6:
+            return "Hujung Minggu"
+        return "Hari Biasa"
