@@ -20,6 +20,7 @@ def get_business_area(site_id):
     s = str(site_id).strip()
     if s == "6340": return "Johor Bahru"
     if s == "6342": return "Kulai Jaya"
+    if s == "6435": return "Pasir Gudang"
     if s == "6346": return "Johor Jaya"
     if s == "6410": return "Kota Bharu"
     return ""
