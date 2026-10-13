@@ -13,92 +13,103 @@ MALAYSIA_TZ = timezone(timedelta(hours=8))
 
 class ImageInjector:
     @staticmethod
-    def _unique_urls(urls):
-        return list(dict.fromkeys(url for url in urls if url))
+    def _normalize_text(text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+    @staticmethod
+    def _contains_any(text: str, needles: list[str]) -> bool:
+        return any(needle in text for needle in needles)
 
     @staticmethod
     def choose_diskon_url(img_info):
-        old_candidates = ImageInjector._unique_urls(img_info.get("old_candidates", []))
-        if old_candidates:
-            if len(old_candidates) > 1:
-                return None, "Multiple OLD images found"
-            return old_candidates[0], None
-
-        fallback_candidates = ImageInjector._unique_urls(
-            [
-                img_info.get("new"),
-                img_info.get("card"),
-                img_info.get("first"),
-            ]
-        )
-        if not fallback_candidates:
-            return None, "No image timestamp found"
-        return fallback_candidates[0], None
+        for image_type in ("old", "new", "card", "first"):
+            url = img_info.get(image_type)
+            if url:
+                return url, None
+        return None, "No image timestamp found"
 
     @staticmethod
     def detect_type(*texts: str) -> str | None:
-        combined = " ".join(str(text or "") for text in texts).lower()
+        url_text = str(texts[0] or "") if texts else ""
+        attachment_name = str(texts[1] or "") if len(texts) > 1 else ""
+        combined = f"{url_text} {attachment_name}".strip().lower()
         if not combined:
             return None
-        filename = combined.split("/")[-1]
-        
-        # OLD READ
-        if any(x in filename for x in ["old_read", "oldread", "old_red", "old_rea"]):
+
+        filename = url_text.lower().split("/")[-1] if url_text else combined
+        normalized_filename = ImageInjector._normalize_text(filename)
+        normalized_name = ImageInjector._normalize_text(attachment_name)
+        normalized_combined = ImageInjector._normalize_text(combined)
+
+        # OLD READ / OLD METER
+        if ImageInjector._contains_any(
+            normalized_combined,
+            [
+                "old read",
+                "oldread",
+                "old red",
+                "old rea",
+                "old meter",
+                "oldmeter",
+                "meter lama",
+                "lama meter",
+            ],
+        ):
             return "old"
-            
+
         # CARD
-        # Typos: cad, crd, car, ard
-        if any(x in filename for x in ["card", "cad", "crd", "car", "ard"]):
+        if ImageInjector._contains_any(
+            normalized_name,
+            [
+                "card",
+                "meter card",
+                "kad",
+                "meter kad",
+                "kad meter",
+            ],
+        ):
             return "card"
-        
+        if any(x in normalized_filename for x in ["card", "cad", "crd", "car", "ard"]):
+            return "card"
+
         # NEW METER
-        # Typos: newmeter, nee_meter, new_meer, new_metwr, mew_meter, ew_meter
-        if any(
-            x in filename
-            for x in [
-                "new_meter",
+        if ImageInjector._contains_any(
+            normalized_combined,
+            [
                 "new meter",
                 "newmeter",
                 "neww meter",
                 "newwmeter",
                 "newmemeter",
-                "nee_meter",
                 "nee meter",
-                "new_metwr",
+                "nee meter",
                 "new metwr",
                 "new meer",
-                "new_meer",
-                "mew_meter",
                 "mew meter",
                 "mewmeter",
-                "ew_meter",
                 "ew meter",
                 "ewmeter",
-                "nw_meter",
                 "nw meter",
-                "new_mter",
                 "new mter",
-                "new_metr",
                 "new metr",
-                "new_mete",
                 "new mete",
-                "new_kete",
-                "new_mtr",
+                "new kete",
                 "new mtr",
                 "newmeterr",
                 "new eter",
-                "new_eter"
-            ]
+                "meter baru",
+                "baru meter",
+            ],
         ):
             return "new"
-            
+
         # Fallback fuzzy for new meter
         if (
-            ("new_m" in filename or "mew_m" in filename or "ew_m" in filename)
-            and ("eer" in filename or "ter" in filename or "etr" in filename or "meter" in filename)
+            ("new m" in normalized_combined or "mew m" in normalized_combined or "ew m" in normalized_combined)
+            and ("eer" in normalized_combined or "ter" in normalized_combined or "etr" in normalized_combined or "meter" in normalized_combined)
         ):
             return "new"
-        
+
         return None
 
     @staticmethod
@@ -114,6 +125,10 @@ class ImageInjector:
         }
         for column in columns:
             if column in explicit_names:
+                return column
+            if "ATTACH" in column and "NAME" in column:
+                return column
+            if "FILE" in column and "NAME" in column:
                 return column
 
         try:
@@ -178,15 +193,12 @@ class ImageInjector:
                     "card": None,
                     "new": None,
                     "first": None,
-                    "old_candidates": [],
                 }
             
             if url_map[so]["first"] is None:
                 url_map[so]["first"] = url
             
             t = ImageInjector.detect_type(url, attachment_name)
-            if t == "old":
-                url_map[so]["old_candidates"].append(url)
             if t and url_map[so][t] is None:
                 url_map[so][t] = url
         return url_map

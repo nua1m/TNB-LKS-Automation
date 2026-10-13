@@ -4,6 +4,33 @@ from openpyxl.utils import get_column_letter
 
 class Preprocessor:
     @staticmethod
+    def _normalize_header(value):
+        import re
+
+        return re.sub(r"[^A-Z0-9]+", " ", str(value or "").upper()).strip()
+
+    @staticmethod
+    def _find_column_by_keywords(ws, required_keywords):
+        for col in range(1, ws.max_column + 1):
+            header = Preprocessor._normalize_header(ws.cell(1, col).value)
+            if all(keyword in header for keyword in required_keywords):
+                return col
+        return None
+
+    @staticmethod
+    def _remove_fully_empty_columns(ws):
+        for col in range(ws.max_column, 0, -1):
+            header = str(ws.cell(1, col).value or "").strip()
+            has_data = False
+            for row in range(2, ws.max_row + 1):
+                value = ws.cell(row, col).value
+                if str(value or "").strip():
+                    has_data = True
+                    break
+            if not header and not has_data:
+                ws.delete_cols(col)
+
+    @staticmethod
     def process_legacy_file(file_path):
         """
         New Workflow:
@@ -109,13 +136,7 @@ class Preprocessor:
                  ws.delete_cols(4)
                  offset = 1 # We deleted 1 column before target area
             
-            # D. Delete "Column T" (Original 20)
-            # User wants to remove the "Border" column (Original 20).
-            # If we deleted D, this is now 19 (S). If we didn't, it is 20 (T).
-            # Target Delete Index = 20 - offset
-            ws.delete_cols(20 - offset)
-            
-            # E. Remove Footer ... (Same logic)
+            # D. Remove Footer ... (Same logic)
             max_r = ws.max_row
             found_footer_at = None
             for r in range(max_r, max(1, max_r - 20), -1):
@@ -130,18 +151,16 @@ class Preprocessor:
             else:
                if ws.max_row > 2: ws.delete_rows(ws.max_row - 1, 2)
 
-            # F. Resize & Add Image Formulas
-            # 1. FIND URL Column
-            url_col_idx = 18 - offset # Fallback: Original R (18) shifted by offset
-            
-            # Dynamic Scan
-            for col in range(1, ws.max_column + 1):
-                val = str(ws.cell(1, col).value).upper()
-                if "URL" in val and "ATTACH" in val:
-                    url_col_idx = col
-                    break
-            
+            # E. Remove any fully blank columns left behind by the legacy sheet structure.
+            Preprocessor._remove_fully_empty_columns(ws)
+
+            # F. Preserve attachment name/file columns, then append a new IMAGES column.
+            url_col_idx = Preprocessor._find_column_by_keywords(ws, ["ATTACH", "URL"])
+            if not url_col_idx:
+                url_col_idx = 18 - offset  # Fallback: original R shifted by offset
+
             img_col_idx = url_col_idx + 1
+            ws.insert_cols(img_col_idx)
             img_col_letter = get_column_letter(img_col_idx)
 
             # 2. Add Header
