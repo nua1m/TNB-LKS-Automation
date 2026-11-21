@@ -153,6 +153,7 @@ def run_process(
 
     if not new_rows:
         _emit(log_fn, f"{YELLOW}All SOs already exist in the template. Refreshing report sheets only.{RESET}")
+        handler.extend_data_sheets()
         update_report_sheets()
         handler.save()
         handler.close()
@@ -178,6 +179,7 @@ def run_process(
     start_claim = get_next_empty(handler.ws_claim)
     start_attach = get_next_empty(handler.ws_attach)
     ClaimService.write_data(handler, new_rows, start_claim, start_attach)
+    handler.extend_data_sheets()
     new_so_set = {clean_so(row["Service Order"]) for row in new_rows if clean_so(row["Service Order"])}
 
     step("Checking image links", "Checking image links")
