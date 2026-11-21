@@ -168,6 +168,7 @@ class SummaryService:
 
         return {
             "dates": len(sorted_dates),
+            "total_row": total_row,
             "undated_claims": undated_claims,
             "undated_tras": tras_counts[None],
         }

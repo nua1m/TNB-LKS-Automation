@@ -15,6 +15,7 @@ from core.services.image_injector import ImageInjector
 from core.services.quality_control import QualityControl
 from core.services.preprocessor import Preprocessor
 from core.services.summary_service import SummaryService
+from core.services.kpi_service import KpiService
 
 LogFn = Callable[[str], None]
 ConfirmAppendFn = Callable[[int, int], bool]
@@ -93,6 +94,17 @@ def run_process(
     step("Reading input data", "Reading input data")
     claim_rows, stats = ClaimService.build_rows(source_path, sheet_name=source_sheet)
 
+    def update_report_sheets() -> None:
+        step("Updating the SUMMARY sheet", "Updating SUMMARY")
+        summary_report = SummaryService.populate(handler, stats.get("tras_by_date", {}))
+        _log_summary_report(log_fn, summary_report)
+
+        step("Updating the KPI sheet", "Updating KPI")
+        kpi_report = KpiService.populate(handler, summary_report["total_row"])
+        _emit(log_fn, f"{DIM}  - KPI teams           : {RESET}{GREEN}{kpi_report['teams']}{RESET}")
+        if kpi_report["unassigned_claims"]:
+            _emit(log_fn, f"{YELLOW}  - CLAIM rows without a valid team ID: {kpi_report['unassigned_claims']}{RESET}")
+
     _emit(log_fn, f"{DIM}  - SOs after TRAS removal : {RESET}{GREEN}{stats['sos_after_tras']}{RESET}")
     _emit(log_fn, f"{DIM}  - Duplicate SOs skipped : {RESET}{GREEN}{stats['duplicates_skipped']}{RESET}")
     _emit(log_fn, f"{DIM}  - Rows skipped for TRAS : {RESET}{GREEN}{stats['tras_removed']}{RESET}")
@@ -140,10 +152,8 @@ def run_process(
             return {"aborted": True, "output_path": str(output_path)}
 
     if not new_rows:
-        _emit(log_fn, f"{YELLOW}All SOs already exist in the template. Refreshing SUMMARY only.{RESET}")
-        step("Updating the SUMMARY sheet", "Updating SUMMARY")
-        summary_report = SummaryService.populate(handler, stats.get("tras_by_date", {}))
-        _log_summary_report(log_fn, summary_report)
+        _emit(log_fn, f"{YELLOW}All SOs already exist in the template. Refreshing report sheets only.{RESET}")
+        update_report_sheets()
         handler.save()
         handler.close()
         return {
@@ -229,9 +239,7 @@ def run_process(
     QualityControl.mark_defective(handler, missing)
     QualityControl.format_all(handler)
 
-    step("Updating the SUMMARY sheet", "Updating SUMMARY")
-    summary_report = SummaryService.populate(handler, stats.get("tras_by_date", {}))
-    _log_summary_report(log_fn, summary_report)
+    update_report_sheets()
 
     step("Saving the result workbook", "Saving result workbook")
     handler.save()
