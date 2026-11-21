@@ -14,6 +14,7 @@ from core.services.claim_service import ClaimService
 from core.services.image_injector import ImageInjector
 from core.services.quality_control import QualityControl
 from core.services.preprocessor import Preprocessor
+from core.services.summary_service import SummaryService
 
 LogFn = Callable[[str], None]
 ConfirmAppendFn = Callable[[int, int], bool]
@@ -22,6 +23,14 @@ StatusFn = Callable[[str], None]
 
 def _emit(log_fn: LogFn, message: str = "") -> None:
     log_fn(message)
+
+
+def _log_summary_report(log_fn: LogFn, report: dict) -> None:
+    _emit(log_fn, f"{DIM}  - Summary dates       : {RESET}{GREEN}{report['dates']}{RESET}")
+    if report["undated_claims"]:
+        _emit(log_fn, f"{YELLOW}  - CLAIM rows without a usable date: {report['undated_claims']}{RESET}")
+    if report["undated_tras"]:
+        _emit(log_fn, f"{YELLOW}  - TRAS with unknown date: {report['undated_tras']}{RESET}")
 
 
 def run_process(
@@ -131,7 +140,11 @@ def run_process(
             return {"aborted": True, "output_path": str(output_path)}
 
     if not new_rows:
-        _emit(log_fn, f"{YELLOW}All SOs already exist in the template. Nothing new was added.{RESET}")
+        _emit(log_fn, f"{YELLOW}All SOs already exist in the template. Refreshing SUMMARY only.{RESET}")
+        step("Updating the SUMMARY sheet", "Updating SUMMARY")
+        summary_report = SummaryService.populate(handler, stats.get("tras_by_date", {}))
+        _log_summary_report(log_fn, summary_report)
+        handler.save()
         handler.close()
         return {
             "aborted": False,
@@ -215,6 +228,10 @@ def run_process(
     QualityControl.mark_diskon(handler, diskon_report["diskon_rows"])
     QualityControl.mark_defective(handler, missing)
     QualityControl.format_all(handler)
+
+    step("Updating the SUMMARY sheet", "Updating SUMMARY")
+    summary_report = SummaryService.populate(handler, stats.get("tras_by_date", {}))
+    _log_summary_report(log_fn, summary_report)
 
     step("Saving the result workbook", "Saving result workbook")
     handler.save()

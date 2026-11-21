@@ -22,6 +22,7 @@ The immediate product direction is internal operational use first: make the tool
 - remove `TRAS` rows
 - skip duplicate service orders already present in the template
 - write claim and attachment rows into the target workbook
+- fill the SUMMARY sheet by date, day type, phase, KIV/appointment, and TRAS; CLAIM counts recalculate when edited in Excel
 - inject image evidence into the output workbook
 - detect missing image slots and highlight defective rows
 - save a final `.xlsm` file based on the bundled template
