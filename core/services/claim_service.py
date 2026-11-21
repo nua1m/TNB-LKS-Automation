@@ -18,6 +18,7 @@ from config import (
 
 def get_business_area(site_id):
     s = str(site_id).strip()
+    if s == "6333": return "Pontian"
     if s == "6340": return "Johor Bahru"
     if s == "6342": return "Kulai Jaya"
     if s == "6345": return "Pasir Gudang"
