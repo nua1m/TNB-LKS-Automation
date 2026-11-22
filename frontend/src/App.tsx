@@ -22,7 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
-type ModuleKey = "lks" | "payslip";
+type ModuleKey = "lks" | "payslip" | "merge";
 
 type PayslipRunResult = Extract<
   DesktopEvent,
@@ -75,6 +75,11 @@ type DesktopEvent =
         } | null;
       };
     }
+  | {
+      type: "runCompleted";
+      module: "merge";
+      result: { paths: string[]; uniqueSos: number; duplicatesSkipped: number };
+    }
   | { type: "runFailed"; module: ModuleKey; message: string };
 
 type DesktopInitialState = {
@@ -86,6 +91,7 @@ type DesktopInitialState = {
     calcPath?: string;
     masterPath?: string;
     outputDir?: string;
+    mergeOutputDir?: string;
   };
 };
 
@@ -97,10 +103,12 @@ type DesktopBridge = {
   pickFile: (kind: string, callback: (value: string) => void) => void;
   pickLksFiles: (callback: (value: string) => void) => void;
   pickDirectory: (callback: (value: string) => void) => void;
+  pickMergeDirectory: (callback: (value: string) => void) => void;
   openPath: (target: string) => void;
   checkUpdates: (module: string) => void;
   startLks: (payloadJson: string) => void;
   startPayslip: (payloadJson: string) => void;
+  startMerge: (payloadJson: string) => void;
   respondAppendConfirmation: (answer: boolean) => void;
 };
 
@@ -145,6 +153,17 @@ type PayslipState = {
   summary: PayslipRunResult | null;
 };
 
+type MergeState = {
+  running: boolean;
+  previousPath: string;
+  newPath: string;
+  outputDir: string;
+  paths: string[];
+  uniqueSos: number;
+  duplicatesSkipped: number;
+  logLines: string[];
+};
+
 const moduleMeta: Record<
   ModuleKey,
   {
@@ -164,6 +183,11 @@ const moduleMeta: Record<
     title: "Payslip Generator",
     description:
       "Generate salary workbooks and PDF payslips from the calculation workbook or from selected LKS CLAIM files.",
+  },
+  merge: {
+    label: "Workbooks",
+    title: "Combine LKS",
+    description: "Merge completed LKS files and carry any balance into a separate file.",
   },
 };
 
@@ -215,6 +239,17 @@ function App() {
     summary: null,
   });
 
+  const [merge, setMerge] = useState<MergeState>({
+    running: false,
+    previousPath: "",
+    newPath: "",
+    outputDir: "",
+    paths: [],
+    uniqueSos: 0,
+    duplicatesSkipped: 0,
+    logLines: ["No merge started yet."],
+  });
+
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
@@ -264,6 +299,7 @@ function App() {
                 masterPath: initial.defaults.masterPath || "",
                 outputDir: initial.defaults.outputDir || "",
               }));
+              setMerge((current) => ({ ...current, outputDir: initial.defaults.mergeOutputDir || "" }));
             })
             .catch((error) => addToast("error", String(error)));
         },
@@ -302,6 +338,14 @@ function App() {
       return;
     }
 
+    if (payload.type === "log" && payload.module === "merge") {
+      setMerge((current) => ({
+        ...current,
+        logLines: appendUniqueLog(current.logLines, "No merge started yet.", payload.message),
+      }));
+      return;
+    }
+
     if (payload.type === "runStarted" && payload.module === "lks") {
       setLks((current) => ({
         ...current,
@@ -323,6 +367,18 @@ function App() {
         lastOutputDir: "",
         summary: null,
         logLines: ["Starting payslip generation..."],
+      }));
+      return;
+    }
+
+    if (payload.type === "runStarted" && payload.module === "merge") {
+      setMerge((current) => ({
+        ...current,
+        running: true,
+        paths: [],
+        uniqueSos: 0,
+        duplicatesSkipped: 0,
+        logLines: ["Starting merge..."],
       }));
       return;
     }
@@ -377,6 +433,19 @@ function App() {
       return;
     }
 
+    if (payload.type === "runCompleted" && payload.module === "merge") {
+      setMerge((current) => ({
+        ...current,
+        running: false,
+        paths: payload.result.paths,
+        uniqueSos: payload.result.uniqueSos,
+        duplicatesSkipped: payload.result.duplicatesSkipped,
+        logLines: [...current.logLines, "Merge completed."],
+      }));
+      addToast("success", "LKS files combined.");
+      return;
+    }
+
     if (payload.type === "runFailed" && payload.module === "lks") {
       setLks((current) => ({
         ...current,
@@ -400,6 +469,16 @@ function App() {
       addToast("error", payload.message);
       return;
     }
+
+    if (payload.type === "runFailed" && payload.module === "merge") {
+      setMerge((current) => ({
+        ...current,
+        running: false,
+        logLines: [...current.logLines, `Merge failed: ${payload.message}`],
+      }));
+      addToast("error", payload.message);
+      return;
+    }
   }
 
   function addToast(level: ToastState["level"], message: string) {
@@ -410,7 +489,7 @@ function App() {
     }, 4200);
   }
 
-  async function browseFile(kind: "lksInput" | "calc" | "master") {
+  async function browseFile(kind: "lksInput" | "calc" | "master" | "mergePrevious" | "mergeNew") {
     if (!bridge) {
       addToast("error", "Desktop bridge not ready.");
       return;
@@ -428,6 +507,12 @@ function App() {
       }
       if (kind === "master") {
         setPayslip((current) => ({ ...current, masterPath: selected }));
+      }
+      if (kind === "mergePrevious") {
+        setMerge((current) => ({ ...current, previousPath: selected }));
+      }
+      if (kind === "mergeNew") {
+        setMerge((current) => ({ ...current, newPath: selected }));
       }
     } catch (error) {
       addToast("error", String(error));
@@ -457,17 +542,21 @@ function App() {
     }
   }
 
-  async function browseDirectory() {
+  async function browseDirectory(target: "payslip" | "merge" = "payslip") {
     if (!bridge) {
       addToast("error", "Desktop bridge not ready.");
       return;
     }
     try {
-      const selected = await bridgeCall<string>(bridge, "pickDirectory");
+      const selected = await bridgeCall<string>(bridge, target === "merge" ? "pickMergeDirectory" : "pickDirectory");
       if (!selected) {
         return;
       }
-      setPayslip((current) => ({ ...current, outputDir: selected }));
+      if (target === "merge") {
+        setMerge((current) => ({ ...current, outputDir: selected }));
+      } else {
+        setPayslip((current) => ({ ...current, outputDir: selected }));
+      }
     } catch (error) {
       addToast("error", String(error));
     }
@@ -534,6 +623,27 @@ function App() {
         lksPaths: payslip.lksPaths,
       }),
     );
+  }
+
+  function startMergeRun() {
+    if (!bridge) {
+      addToast("error", "Desktop bridge not ready.");
+      return;
+    }
+    if (!merge.previousPath || !merge.newPath || !merge.outputDir) {
+      addToast("error", "Select both LKS files and an output folder.");
+      return;
+    }
+    if (merge.previousPath.toLowerCase() === merge.newPath.toLowerCase()) {
+      addToast("error", "Select two different LKS files.");
+      return;
+    }
+    setMerge((current) => ({ ...current, running: true, paths: [], logLines: ["Starting merge..."] }));
+    bridge.startMerge(JSON.stringify({
+      previousPath: merge.previousPath,
+      newPath: merge.newPath,
+      outputDir: merge.outputDir,
+    }));
   }
 
   function respondAppendConfirmation(answer: boolean) {
@@ -713,7 +823,7 @@ function App() {
                   </Card>
                 </div>
               </div>
-            ) : (
+            ) : activeModule === "payslip" ? (
               <div className="grid h-full grid-cols-1 gap-3 xl:grid-cols-[minmax(440px,1fr)_minmax(480px,1fr)]">
                 <div className="flex min-h-0 flex-col gap-3">
                   <Card className="min-h-0 flex flex-1 flex-col overflow-hidden">
@@ -804,7 +914,7 @@ function App() {
                       <Field label="Output folder">
                         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
                           <Input value={payslip.outputDir} readOnly placeholder="Select the output folder" />
-                          <Button variant="secondary" onClick={browseDirectory} disabled={payslip.running}>
+                          <Button variant="secondary" onClick={() => browseDirectory()} disabled={payslip.running}>
                             Browse
                           </Button>
                         </div>
@@ -897,6 +1007,79 @@ function App() {
                     </CardContent>
                   </Card>
                 </div>
+              </div>
+            ) : (
+              <div className="grid h-full grid-cols-1 gap-3 xl:grid-cols-[minmax(440px,1fr)_minmax(480px,1fr)]">
+                <div className="flex min-h-0 flex-col gap-3">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Source Workbooks</CardTitle>
+                      <CardDescription>Select the previous balance first, then the new LKS.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <Field label="Previous balance LKS">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                          <Input value={merge.previousPath} readOnly placeholder="Select previous balance .xlsm" />
+                          <Button variant="secondary" onClick={() => browseFile("mergePrevious")} disabled={merge.running}>Browse</Button>
+                        </div>
+                      </Field>
+                      <Field label="New LKS">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                          <Input value={merge.newPath} readOnly placeholder="Select new .xlsm" />
+                          <Button variant="secondary" onClick={() => browseFile("mergeNew")} disabled={merge.running}>Browse</Button>
+                        </div>
+                      </Field>
+                      <Field label="Output folder">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                          <Input value={merge.outputDir} readOnly placeholder="Select output folder" />
+                          <Button variant="secondary" onClick={() => browseDirectory("merge")} disabled={merge.running}>Browse</Button>
+                        </div>
+                      </Field>
+                      <div className="flex flex-wrap gap-3 pt-2">
+                        <Button onClick={startMergeRun} disabled={merge.running}>Combine LKS</Button>
+                        <Button variant="secondary" disabled={merge.running || merge.paths.length === 0} onClick={() => bridge?.openPath(merge.outputDir)}>
+                          Open Output Folder
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="min-h-0 flex flex-1 flex-col overflow-hidden">
+                    <CardHeader><CardTitle>Merge Log</CardTitle></CardHeader>
+                    <CardContent className="min-h-0 flex-1">
+                      <ScrollArea className="h-full rounded-2xl border border-border bg-muted/40 p-3.5">
+                        <div className="space-y-2 text-sm text-foreground">
+                          {merge.logLines.map((line, index) => <p key={`${index}-${line}`}>{line}</p>)}
+                        </div>
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
+                </div>
+                <Card className="min-h-0 flex flex-col overflow-hidden">
+                  <CardHeader>
+                    <CardTitle>Merge Summary</CardTitle>
+                    <CardDescription>Each file holds up to 1,000 unique SOs. The first copy of a duplicate is kept.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="min-h-0 flex-1 space-y-4 overflow-auto">
+                    <MetricGrid items={[
+                      { key: "unique", label: "Unique SOs", value: merge.paths.length ? String(merge.uniqueSos) : "--" },
+                      { key: "duplicates", label: "Duplicates skipped", value: merge.paths.length ? String(merge.duplicatesSkipped) : "--" },
+                      { key: "files", label: "Files created", value: merge.paths.length ? String(merge.paths.length) : "--" },
+                    ]} />
+                    {merge.paths.length > 0 && (
+                      <div className="space-y-2">
+                        {merge.paths.map((path, index) => (
+                          <div key={path} className="flex min-w-0 items-center justify-between gap-3 rounded-2xl border border-border bg-muted/40 px-4 py-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{index === 0 ? "Combined LKS" : `Balance ${index}`}</p>
+                              <p className="truncate text-xs text-muted-foreground" title={path}>{basename(path)}</p>
+                            </div>
+                            <Button variant="secondary" onClick={() => bridge?.openPath(path)}>Open</Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
             )}
           </div>

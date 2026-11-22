@@ -144,6 +144,19 @@ If the tool is later sold to other vendors, the app should move toward:
 
 ## Local Run
 
+### Combine completed LKS files
+
+In the desktop app, select the `Combine LKS` tab. Choose the previous
+balance first, the newer LKS second, then an output folder. Both inputs must be
+`.xlsm` workbooks. The merge keeps the first copy of a duplicate SO, including
+its manual CLAIM and ATTACHMENT edits, and creates files of up to 1,000 SOs.
+Any remainder becomes a separate balance file. ATTACHMENT pictures are pasted
+as embedded Excel image values, so the merge works without the TNB network.
+TRAS summary counts are not carried into merged files.
+
+The source files are opened read-only and are never overwritten. Close any
+generated output before merging again.
+
 Install dependencies:
 
 ```powershell

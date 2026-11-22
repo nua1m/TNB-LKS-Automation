@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from config import DEFAULT_TEMPLATE_PATH
+from core.services.lks_merge_service import merge_lks
 from core.services.payslip_service import (
     DEFAULT_CALC_PATH,
     DEFAULT_LKS_SAMPLE_PATH,
@@ -131,6 +132,31 @@ class WebPayslipWorker(QObject):
         self.finished.emit(result)
 
 
+class WebMergeWorker(QObject):
+    finished = Signal(dict)
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, previous: Path, new: Path, output_dir: Path):
+        super().__init__()
+        self.previous = previous
+        self.new = new
+        self.output_dir = output_dir
+
+    def run(self) -> None:
+        import pythoncom
+
+        pythoncom.CoInitialize()
+        try:
+            result = merge_lks(self.previous, self.new, self.output_dir, log=self.progress.emit)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        finally:
+            pythoncom.CoUninitialize()
+        self.finished.emit(result)
+
+
 class Bridge(QObject):
     eventEmitted = Signal(str)
     queuedEvent = Signal(str)
@@ -142,6 +168,8 @@ class Bridge(QObject):
         self.lks_worker: WebLksWorker | None = None
         self.payslip_thread: QThread | None = None
         self.payslip_worker: WebPayslipWorker | None = None
+        self.merge_thread: QThread | None = None
+        self.merge_worker: WebMergeWorker | None = None
         self.queuedEvent.connect(self._dispatch_event)
 
     def _emit(self, payload: dict) -> None:
@@ -190,6 +218,7 @@ class Bridge(QObject):
                     "calcPath": str(DEFAULT_CALC_PATH) if DEFAULT_CALC_PATH.exists() else "",
                     "masterPath": str(DEFAULT_MASTER_PATH) if DEFAULT_MASTER_PATH.exists() else "",
                     "outputDir": str(DEFAULT_OUTPUT_DIR),
+                    "mergeOutputDir": str(APP_DIR / "results" / "merged"),
                     "lksSampleDir": str(DEFAULT_LKS_SAMPLE_PATH.parent),
                 },
             }
@@ -197,6 +226,14 @@ class Bridge(QObject):
 
     @Slot(str, result=str)
     def pickFile(self, kind: str) -> str:
+        if kind in ("mergePrevious", "mergeNew"):
+            path, _ = QFileDialog.getOpenFileName(
+                self.window,
+                "Select previous balance LKS" if kind == "mergePrevious" else "Select new LKS",
+                str(Path.home()),
+                "LKS workbooks (*.xlsm)",
+            )
+            return path
         if kind == "lksInput":
             path, _ = QFileDialog.getOpenFileName(
                 self.window,
@@ -241,6 +278,14 @@ class Bridge(QObject):
             str(DEFAULT_OUTPUT_DIR),
         )
         return folder
+
+    @Slot(result=str)
+    def pickMergeDirectory(self) -> str:
+        return QFileDialog.getExistingDirectory(
+            self.window,
+            "Select Merge Output Folder",
+            str(APP_DIR),
+        )
 
     @Slot(str)
     def checkUpdates(self, _module: str = "") -> None:
@@ -447,6 +492,55 @@ class Bridge(QObject):
         self.payslip_thread = None
         self._emit({"type": "runFailed", "module": "payslip", "message": message})
 
+    @Slot(str)
+    def startMerge(self, payload_json: str) -> None:
+        if self.merge_thread is not None:
+            self._emit({"type": "runFailed", "module": "merge", "message": "A merge is already running."})
+            return
+        payload = json.loads(payload_json)
+        previous = Path(payload.get("previousPath", "")).expanduser()
+        new = Path(payload.get("newPath", "")).expanduser()
+        output_dir = Path(payload.get("outputDir", "")).expanduser()
+        if not previous.is_file() or not new.is_file() or not payload.get("outputDir"):
+            self._emit({"type": "runFailed", "module": "merge", "message": "Select both LKS files and an output folder."})
+            return
+
+        self.merge_thread = QThread(self.window)
+        self.merge_worker = WebMergeWorker(previous.resolve(), new.resolve(), output_dir.resolve())
+        self.merge_worker.moveToThread(self.merge_thread)
+        self.merge_thread.started.connect(self.merge_worker.run)
+        self.merge_worker.progress.connect(
+            lambda message: self._emit({"type": "log", "module": "merge", "message": message})
+        )
+        self.merge_worker.finished.connect(self._handle_merge_finished)
+        self.merge_worker.failed.connect(self._handle_merge_failed)
+        self.merge_worker.finished.connect(self.merge_thread.quit)
+        self.merge_worker.failed.connect(self.merge_thread.quit)
+        self.merge_thread.finished.connect(self.merge_worker.deleteLater)
+        self.merge_thread.finished.connect(self.merge_thread.deleteLater)
+        self._emit({"type": "runStarted", "module": "merge"})
+        self.merge_thread.start()
+
+    @Slot(dict)
+    def _handle_merge_finished(self, result: dict) -> None:
+        self.merge_worker = None
+        self.merge_thread = None
+        self._emit({
+            "type": "runCompleted",
+            "module": "merge",
+            "result": {
+                "paths": [str(path) for path in result["paths"]],
+                "uniqueSos": result["unique_sos"],
+                "duplicatesSkipped": result["duplicates_skipped"],
+            },
+        })
+
+    @Slot(str)
+    def _handle_merge_failed(self, message: str) -> None:
+        self.merge_worker = None
+        self.merge_thread = None
+        self._emit({"type": "runFailed", "module": "merge", "message": message})
+
 
 class ModernShellWindow(QMainWindow):
     def __init__(self):
@@ -472,6 +566,7 @@ class ModernShellWindow(QMainWindow):
         refresh_action.triggered.connect(self.view.reload)
         self.addAction(refresh_action)
         refresh_action.setShortcut("Ctrl+R")
+
 
 
 def main() -> int:
